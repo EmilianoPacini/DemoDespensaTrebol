@@ -1,3 +1,35 @@
 <!DOCTYPE html>
-<html lang="es-AR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#1F7A4C"><title>Despensa el Trébol | Stock y ventas</title><link rel="stylesheet" href="styles.css?v=crm24"></head>
-<body><div class="shell"><aside class="sidebar"><div class="brand"><span class="brand-mark">DT</span><span class="brand-name">Despensa el Trébol</span></div><nav id="desktop-nav" class="side-nav" aria-label="Navegación"></nav><div class="sidebar-foot"><span class="demo-tag">DEMOSTRACIÓN</span><p>Gestión de stock y ventas<br>Versión CRM 2.4</p><button class="text-btn" data-action="reset">Reiniciar demo</button></div></aside><div class="main-wrap"><header class="topbar"><div><p class="topbar-brand">Despensa el Trébol</p><h1 id="page-title">Inicio</h1><p id="page-subtitle" class="muted"></p></div><span class="demo-tag">CRM 2.4 · Demo</span></header><main id="app" class="app"></main><footer class="app-note">Demo: los cambios se guardan en este navegador. No emite comprobantes fiscales.</footer></div><nav id="mobile-nav" class="bottom-nav" aria-label="Navegación móvil"></nav></div><dialog id="modal" aria-labelledby="modal-title"></dialog><div id="toast" class="toast" role="status" aria-live="polite" hidden></div><script src="core.js?v=crm24"></script><script src="purchase-pdf.js?v=crm24"></script><script src="app.js?v=crm24"></script></body></html>
+<html lang="es-AR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#184d3c">
+  <title>Despensa el Trébol · Stock y ventas</title>
+  <link rel="stylesheet" href="styles.css?v=12">
+</head>
+<body>
+  <a class="skip-link" href="#app">Ir al contenido</a>
+  <div class="shell">
+    <aside class="sidebar">
+      <div class="brand"><span class="brand-mark" aria-hidden="true"><svg viewBox="0 0 32 32" fill="none"><path d="M16 16C3 18 3 4 10 5c4 0 6 5 6 11Zm0 0C14 3 28 3 27 10c0 4-5 6-11 6Zm0 0c13-2 13 12 6 11-4 0-6-5-6-11Zm0 0C18 29 4 29 5 22c0-4 5-6 11-6Z" fill="currentColor"/></svg></span><span class="brand-name">el Trébol<small>Despensa · Gestión</small></span></div>
+      <nav id="desktop-nav" class="side-nav" aria-label="Navegación principal"></nav>
+      <div class="sidebar-foot"><span class="demo-tag">Versión de demostración</span><p>Datos guardados en<br>este navegador.</p><details><summary>Ayuda y opciones</summary><p>Lector USB en modo teclado, con Enter al terminar cada lectura.</p><button class="text-btn" data-action="reset">Reiniciar datos de demo</button></details></div>
+    </aside>
+    <div class="main-wrap">
+      <header class="topbar"><div><h1 id="page-title">Vender</h1><p id="page-subtitle" class="muted"></p></div><span class="store-label">Despensa el Trébol<span class="status-dot"></span></span></header>
+      <main id="app" class="app" tabindex="-1"></main>
+      <footer class="app-note">Demo local · No procesa pagos ni emite comprobantes fiscales.</footer>
+    </div>
+    <nav id="mobile-nav" class="bottom-nav" aria-label="Navegación móvil"></nav>
+  </div>
+  <dialog id="modal" aria-labelledby="modal-title"></dialog>
+  <div id="print-ticket"></div>
+  <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+  <script src="core.js?v=6"></script>
+  <script src="stock-core.js?v=10"></script>
+  <script src="purchase-pdf.js?v=6"></script>
+  <script src="sales-ui.js?v=10"></script>
+  <script src="app.js?v=8"></script>
+  <script src="stock-ui.js?v=10"></script>
+</body>
+</html>

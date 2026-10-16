@@ -15,7 +15,10 @@ function wrap(value,maxWidth,size=11,bold=false){
  }if(line)out.push(line);return out.length?out:[''];
 }
 function build(order){
- const items=order.items;if(!items?.length)throw Error('El pedido no tiene productos.');
+  const items=order.items;if(!items?.length)throw Error('El pedido no tiene productos.');
+ const quantity=l=>l.measure==='weight'?(l.qty/1000).toLocaleString('es-AR',{maximumFractionDigits:3})+' kg':l.packSize>1?(l.qty/l.packSize)+' bultos':l.qty+' u.';
+ const units=items.filter(l=>l.measure!=='weight').reduce((a,l)=>a+l.qty,0),grams=items.filter(l=>l.measure==='weight').reduce((a,l)=>a+l.qty,0);
+ const totals=[units?units+' unidades':'',grams?(grams/1000).toLocaleString('es-AR',{maximumFractionDigits:3})+' kg':''].filter(Boolean).join(' / ');
  const number='PC-'+String(order.number||0).padStart(5,'0'),date=new Date(order.at).toLocaleDateString('es-AR'),status={pending:'Pendiente de recepción',partial:'Recibido parcialmente',received:'Recibido',cancelled:'Cancelado'}[order.status]||'Guardado';
  const pages=[];let commands=[],y=0;
  const text=(value,x,top,size=11,bold=false,color='0.13 0.19 0.24')=>commands.push('BT /'+(bold?'F2':'F1')+' '+size+' Tf '+color+' rg 1 0 0 1 '+x+' '+(842-top)+' Tm '+literal(value)+' Tj ET');
@@ -28,35 +31,54 @@ function build(order){
    text('PEDIDO AL PROVEEDOR',42,122,10,true,'0.30 0.42 0.37');text(number,42,153,28,true);
    text('Fecha: '+date,370,125,11);text(status,370,148,10,true);line(42,174,553,174);
    text('PROVEEDOR',42,203,10,true,'0.38 0.46 0.44');const supplier=wrap(order.supplier||'Sin especificar',500,17,true);supplier.forEach((v,i)=>text(v,42,229+i*22,17,true));
-   y=246+supplier.length*22;text(items.length+' productos  /  '+items.reduce((a,l)=>a+l.qty,0)+' unidades solicitadas',42,y,11);y+=24;
+    y=246+supplier.length*22;text(items.length+' productos  /  '+totals+' solicitados',42,y,11);y+=24;
   }else{text(number+' - continuación',42,110,13,true);text('Fecha: '+date,400,110,10);y=135;}
   rect(42,y,511,29,'0.91 0.95 0.93');text('PRODUCTO',52,y+19,10,true);text('CÓDIGO',345,y+19,10,true);text('CANTIDAD',476,y+19,10,true);y+=40;
  }
  page(true);
  for(const item of items){
-  const names=wrap(item.nombre,275,12,true),barcodes=wrap(item.codigo||'Sin código',92,10),height=Math.max(names.length*17,barcodes.length*14,20)+24;
+   const names=wrap(item.nombre,275,12,true),barcodes=wrap(item.codigo||'Sin código',92,10),presentation=item.packSize>1?'Bulto de '+item.packSize+' / '+item.qty+' unidades':'',height=Math.max(names.length*17+(presentation?16:0),barcodes.length*14,20)+24;
   if(y+height>735)page(false);
-  names.forEach((v,i)=>text(v,52,y+i*17,12,true));barcodes.forEach((v,i)=>text(v,345,y+i*14,10));
-  const qty=item.qty+' u.';let qtySize=12;while(measure(qty,qtySize,true)>86)qtySize--;text(qty,542-measure(qty,qtySize,true),y,qtySize,true);y+=height;line(42,y-12,553,y-12);
+   names.forEach((v,i)=>text(v,52,y+i*17,12,true));barcodes.forEach((v,i)=>text(v,345,y+i*14,10));
+   if(presentation)text(presentation,52,y+names.length*17,10);
+   const qty=quantity(item);let qtySize=12;while(qtySize>6&&measure(qty,qtySize,true)>86)qtySize--;text(qty,542-measure(qty,qtySize,true),y,qtySize,true);y+=height;line(42,y-12,553,y-12);
  }
  const notes=order.note?wrap(order.note,487,11):[];
  if(y+notes.length*16+90>757)page(false);
- y+=7;rect(42,y,511,42,'0.91 0.95 0.93');text('TOTAL SOLICITADO',54,y+26,11,true);const total=items.reduce((a,l)=>a+l.qty,0)+' unidades';text(total,540-measure(total,14,true),y+27,14,true);y+=67;
+  y+=7;rect(42,y,511,42,'0.91 0.95 0.93');text('TOTAL SOLICITADO',54,y+26,11,true);let totalSize=14;while(totalSize>8&&measure(totals,totalSize,true)>280)totalSize--;text(totals,540-measure(totals,totalSize,true),y+27,totalSize,true);y+=67;
  if(notes.length){text('OBSERVACIONES',42,y,10,true);y+=20;for(const v of notes){if(y>755)page(false);text(v,54,y,11);y+=16;}}
  if(order.status==='cancelled'){if(y+35>760)page(false);text('PEDIDO CANCELADO - no entregar las cantidades pendientes.',42,y+25,11,true,'0.62 0.16 0.14');}
  for(let i=0;i<pages.length;i++){commands=pages[i];line(42,793,553,793);text('Despensa el Trébol / '+number,42,812,9,false,'0.38 0.46 0.44');text('Página '+(i+1)+' de '+pages.length,465,812,9,false,'0.38 0.46 0.44');}
- const objects=['','<< /Type /Catalog /Pages 2 0 R >>','','',''];
+  return serialize(pages);
+}
+function serialize(pages,pageWidth=595,pageHeight=842){
+  const objects=['','<< /Type /Catalog /Pages 2 0 R >>','','',''];
  for(const [key,fontId] of [['regular',3],['bold',4]]){
   const f=fonts[key],descriptorId=objects.length,streamId=descriptorId+1,stream=f.hex+'>\n';
   objects[fontId]='<< /Type /Font /Subtype /TrueType /BaseFont /'+f.name+' /FirstChar 32 /LastChar 255 /Widths ['+widths[key].slice(32).join(' ')+'] /Encoding /WinAnsiEncoding /FontDescriptor '+descriptorId+' 0 R >>';
   objects.push('<< /Type /FontDescriptor /FontName /'+f.name+' /Flags 32 /FontBBox ['+f.bbox.join(' ')+'] /ItalicAngle 0 /Ascent '+f.ascent+' /Descent '+f.descent+' /CapHeight 730 /StemV 80 /FontFile2 '+streamId+' 0 R >>','<< /Length '+stream.length+' /Length1 '+f.length+' /Filter /ASCIIHexDecode >>\nstream\n'+stream+'endstream');
  }
- const kids=[];for(const content of pages){const pageId=objects.length,streamId=pageId+1,stream=content.join('\n')+'\n';kids.push(pageId+' 0 R');objects.push('<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 3 0 R /F2 4 0 R >> >> /Contents '+streamId+' 0 R >>','<< /Length '+stream.length+' >>\nstream\n'+stream+'endstream');}
+  const kids=[];for(const content of pages){const pageId=objects.length,streamId=pageId+1,stream=content.join('\n')+'\n';kids.push(pageId+' 0 R');objects.push('<< /Type /Page /Parent 2 0 R /MediaBox [0 0 '+pageWidth+' '+pageHeight+'] /Resources << /Font << /F1 3 0 R /F2 4 0 R >> >> /Contents '+streamId+' 0 R >>','<< /Length '+stream.length+' >>\nstream\n'+stream+'endstream');}
  objects[2]='<< /Type /Pages /Count '+pages.length+' /Kids ['+kids.join(' ')+'] >>';
  let output='%PDF-1.4\n%Trebol\n';const offsets=[0];for(let i=1;i<objects.length;i++){offsets[i]=output.length;output+=i+' 0 obj\n'+objects[i]+'\nendobj\n';}
  const xref=output.length;output+='xref\n0 '+objects.length+'\n0000000000 65535 f \n'+offsets.slice(1).map(n=>String(n).padStart(10,'0')+' 00000 n \n').join('')+'trailer\n<< /Size '+objects.length+' /Root 1 0 R >>\nstartxref\n'+xref+'\n%%EOF\n';
  return Uint8Array.from(output,c=>c.charCodeAt(0));
 }
-return {build};
+function ticket(sale){
+ if(!sale.items?.length)throw Error('La venta no tiene productos.');
+ const pages=[],height=720,width=300,number='OV-'+String(sale.number).padStart(5,'0');
+ let commands,y;
+ const amount=n=>Number(n).toLocaleString('es-AR',{style:'currency',currency:'ARS'});
+ function text(value,x,size=10,bold=false){commands.push('BT /'+(bold?'F2':'F1')+' '+size+' Tf 0.1 0.1 0.1 rg 1 0 0 1 '+x+' '+(height-y)+' Tm '+literal(value)+' Tj ET');}
+ function row(value,bold=false,size=10){for(const part of wrap(value,width-36,size,bold)){if(y>height-65)page();text(part,18,size,bold);y+=size+6;}}
+ function rule(){commands.push('0.7 0.7 0.7 RG 0.5 w 18 '+(height-y)+' m 282 '+(height-y)+' l S');y+=15;}
+ function page(){commands=[];pages.push(commands);y=30;text('Despensa el Trébol',18,16,true);y+=24;row('Ticket '+number);if(sale.status==='cancelled')row('VENTA ANULADA',true);row(new Date(sale.at).toLocaleString('es-AR'));rule();}
+ page();
+  for(const item of sale.items){const nameLines=wrap(item.nombre,width-36,11,true);if(y+nameLines.length*17+42>height-65)page();row(item.nombre,true,11);const weighted=item.measure==='weight',qty=item.cant/(weighted?1000:1);row(qty.toLocaleString('es-AR',{maximumFractionDigits:3})+(weighted?' kg':' u.')+' x '+amount(item.precio)+(weighted?'/kg':'/u.')+' = '+amount(Math.round((qty*item.precio+Number.EPSILON)*100)/100));if(item.returned)row('Devolución registrada: '+(item.returned/(weighted?1000:1)).toLocaleString('es-AR',{maximumFractionDigits:3})+(weighted?' kg':' u.'));y+=6;}
+ if(y>height-145)page();rule();row('TOTAL '+amount(sale.total),true,15);row('Medio de pago: '+sale.payment);if(sale.customer)row('Cliente: '+sale.customer);if(sale.note)row('Observación: '+sale.note);
+ for(let i=0;i<pages.length;i++){commands=pages[i];y=height-35;text('DEMO · No válido como comprobante fiscal',18,8);y+=14;text(number+' · Página '+(i+1)+' de '+pages.length,18,8);}
+ return serialize(pages,width,height);
+}
+return {build,ticket};
 })();
 if(typeof module!=='undefined')module.exports=PurchasePDF;

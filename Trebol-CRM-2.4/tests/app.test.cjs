@@ -5,13 +5,106 @@ const fs=require('node:fs');
 const path=require('node:path');
 function app(initial={}){
  const elements=new Map(),storage=new Map(Object.entries(initial)),handlers={};
- const node=()=>({innerHTML:'',textContent:'',hidden:false,value:'10',classList:{add(){},remove(){}},addEventListener(){},showModal(){this.open=true;},close(){this.open=false;},scrollIntoView(){},focus(){document.activeElement=this;},setSelectionRange(){}});
- const document={querySelector(s){if(!elements.has(s))elements.set(s,node());return elements.get(s);},querySelectorAll(){return [node(),node()];},addEventListener(k,fn){handlers[k]=fn;},createElement(){return {click(){}};}};
+ const node=()=>({innerHTML:'',textContent:'',hidden:false,value:'10',classList:{add(){},remove(){}},addEventListener(){},insertAdjacentHTML(_,html){this.innerHTML+=html;},showModal(){this.open=true;},close(){this.open=false;},scrollIntoView(){},focus(){document.activeElement=this;},setSelectionRange(){}});
+ const document={querySelector(s){if(!elements.has(s)){const n=node();if(s==='#pos-code')n.value='';elements.set(s,n);}return elements.get(s);},querySelectorAll(){return [node(),node()];},addEventListener(k,fn){handlers[k]=fn;},createElement(){return {click(){}};}};
  const localStorage={getItem:k=>storage.get(k)||null,setItem(k,v){if(localStorage.fail)throw Error('Simulated write failure');storage.set(k,v);}};
  const ctx=vm.createContext({document,localStorage,structuredClone,console,Date,Math,Number,String,JSON,Set,Map,Blob,URL,globalThis:{crypto:require('node:crypto').webcrypto},window:{addEventListener(){},scrollTo(){}},setTimeout:()=>1,clearTimeout(){},FormData:class{constructor(target){return new Map(target.fields || []);}}});
- vm.runInContext(fs.readFileSync(path.join(__dirname,'../core.js'),'utf8')+'\n'+fs.readFileSync(path.join(__dirname,'../purchase-pdf.js'),'utf8')+'\n'+fs.readFileSync(path.join(__dirname,'../app.js'),'utf8'),ctx);
+  vm.runInContext(['core.js','stock-core.js','purchase-pdf.js','sales-ui.js','app.js'].map(file=>fs.readFileSync(path.join(__dirname,'../'+file),'utf8')).join('\n'),ctx);
  return {run:s=>vm.runInContext(s,ctx),storage,localStorage,handlers,elements};
 }
+test('Venta primero: catálogo cerrado y una única implementación del compositor',()=>{
+ const a=app(),html=a.elements.get('#app').innerHTML;
+ assert(html.includes('id="sale-search-panel" hidden'));assert(!html.includes('class="sale-product '));
+ assert(html.indexOf('Venta en curso')<html.indexOf('Total a cobrar'));
+ for(const file of ['app.js','stock-ui.js'])assert(!/function (pos|cartLines|checkout|productResults)\(|(?:pos|cartLines|checkout|productResults) = /.test(fs.readFileSync(path.join(__dirname,'../'+file),'utf8')));
+});
+test('Buscar producto: filtra al escribir nombre, marca, presentación y tipo, sin acentos',()=>{
+ const a=app();a.run("mutate(s=>Core.saveProduct(s,{nombre:'Leche entera',marca:'Trébol',presentacion:'500 ml',categoria:'Lácteos',tipo:'Entera',codigo:'DEMO777',measure:'unit',precio:100,costo:50,stock:8}));saleOpenSearch()");
+ for(const value of ['leche','TREBOL','500 ml','entera trebol 500','DEMO777']){
+  a.handlers.input({target:{id:'pos-search',value}});
+  assert(a.run("saleMatches().some(p=>p.codigo==='DEMO777')"));
+  const html=a.elements.get('#pos-results').innerHTML;assert(html.includes('Marca: Trébol'));assert(html.includes('Presentación: 500 ml'));assert(html.includes('Lácteos · Entera'));assert(html.includes('Venta por unidad'));assert(html.includes('8 u. disponibles'));
+ }
+ a.handlers.input({target:{id:'pos-search',value:'NO-COINCIDE'}});assert.equal(a.run('saleMatches().length'),0);
+ a.run("query='7790895001234'");assert(!a.run('productResults()').includes('Marca:'));
+});
+test('Marca y presentación se conservan al recargar y editar sin alterar stock',()=>{
+ const a=app();a.run("mutate(s=>Core.saveProduct(s,{nombre:'Ejemplo',marca:'Marca real',presentacion:'500 g',categoria:'Almacén',tipo:'General',codigo:'P-META',precio:100,costo:50,stock:3}));mutate(s=>Core.saveProduct(s,{nombre:'Ejemplo actualizado',categoria:'Almacén',tipo:'General',codigo:'P-META',precio:100,costo:50},s.products.at(-1).id))");
+ const b=app(Object.fromEntries(a.storage));assert.equal(b.run('state.products.at(-1).marca'),'Marca real');assert.equal(b.run('state.products.at(-1).presentacion'),'500 g');assert.equal(b.run('state.products.at(-1).stock'),3);
+});
+test('Venta rápida: cantidad absoluta, selección, quitar y deshacer respetan disponibilidad',()=>{
+ const a=app();a.run("scanSale('7790895001234');saleEditQuantity()");
+ assert.equal(a.run("$('#modal').open"),undefined);
+ assert(a.run("saleCommitQuantity({dataset:{cartQuantity:'p1'},value:'6'})"));assert.equal(a.run('cart[0].cant'),6);
+ assert.equal(a.run("saleCommitQuantity({dataset:{cartQuantity:'p1'},value:'100000'})"),false);
+ a.run("$('#modal').close();changeCart('p1',-6)");assert.equal(a.run('cart.length'),0);
+ a.run("saleCommand('undo')");assert.equal(a.run('cart[0].cant'),6);assert.equal(a.run('saleSelected'),'p1');
+});
+test('Venta rápida: Enter nunca registra; F8 requiere soltar y volver a pulsar',()=>{
+ const a=app();a.run("scanSale('7790895001234');checkout()");const count=a.run('state.sales.length');let submits=0;
+ a.run("$('#dialog-form')");a.elements.get('#dialog-form').requestSubmit=()=>submits++;
+ for(const repeat of [false,true])a.handlers.keydown({key:'Enter',repeat,target:{id:'modal-submit'},preventDefault(){}});
+ assert.equal(submits,0);assert.equal(a.run('state.sales.length'),count);
+ a.handlers.keydown({key:'Enter',ctrlKey:true,target:{},preventDefault(){}});assert.equal(submits,0);
+ a.handlers.keydown({key:'F8',target:{},preventDefault(){}});assert.equal(submits,1);
+ a.handlers.keydown({key:'F8',repeat:true,target:{},preventDefault(){}});assert.equal(submits,1);
+ a.handlers.keydown({key:'F8',target:{},preventDefault(){}});assert.equal(submits,1);
+ a.handlers.keyup({key:'F8'});a.handlers.keydown({key:'F8',target:{},preventDefault(){}});assert.equal(submits,2);
+});
+test('Venta rápida: un fallo conserva carrito y no imprime; éxito registra una sola vez',()=>{
+ const a=app();a.run("scanSale('7790895001234');checkout()");const count=a.run('state.sales.length');
+ a.localStorage.fail=true;assert.equal(a.run("modalAction(new Map([['payment','Efectivo'],['print','on']]))"),false);
+ assert.equal(a.run('cart.length'),1);assert.equal(a.run('modalAfterSuccess'),null);
+ a.localStorage.fail=false;assert(a.run("modalAction(new Map([['payment','Efectivo']]))"));
+ assert.equal(a.run('state.sales.length'),count+1);assert.equal(a.run("modalAction(new Map([['payment','Efectivo']]))"),false);
+});
+test('Venta rápida: gramos escritos velozmente no se confunden con un escaneo',()=>{
+ const a=app();a.run("weightDialog(state.products.find(p=>Core.weight(p)).id)");const target={id:'weight-grams',value:'1250'};let blocked=false;
+ for(const [i,key]of [...'1250'].entries())a.handlers.keydown({key,target,timeStamp:1000+i*10,preventDefault(){}});
+ a.handlers.keydown({key:'Enter',target,timeStamp:1050,preventDefault(){blocked=true;}});assert.equal(blocked,false);
+ assert(a.run("modalAction(new Map([['grams','1,250'],['weightUnit','kg']]))"));assert.equal(a.run('cart[0].cant'),1250);
+});
+test('Caja: 6* agrega seis una sola vez y el siguiente escaneo agrega una',()=>{
+ const a=app(),target={id:'pos-code',value:'6',matches:()=>true};
+ a.handlers.keydown({key:'*',code:'NumpadMultiply',target,preventDefault(){}});
+ assert.equal(a.run('saleMultiplier'),6);assert(a.run("scanSale('7790895001234')"));assert.equal(a.run('cart[0].cant'),6);
+ assert.equal(a.run('saleMultiplier'),1);a.run("scanSale('7790895001234')");assert.equal(a.run('cart[0].cant'),7);
+ a.run("saleMultiplier=100;scanSale('7790895001234')");assert.equal(a.run('cart[0].cant'),7);assert.equal(a.run('saleMultiplier'),1);assert(a.run('saleError'));
+ a.run("saleCommand('dismiss');scanSale('7790895001234')");assert.equal(a.run('cart[0].cant'),8);
+ a.run("state.products[1].codigo='6*EXISTE';scanSale('6*EXISTE')");assert.equal(a.run("cart.find(l=>l.id==='p2').cant"),1);
+});
+test('Caja: un error requiere resolución explícita y no permite cerrar ni perder lecturas',()=>{
+ const a=app();a.run("scanSale('7790895001234');scanSale('NO-EXISTE')");
+ assert.equal(a.run("scanSale('7790895002231')"),false);assert.equal(a.run('cart.length'),1);
+ a.run("checkout()");assert(!a.run("$('#modal').open"));
+ a.run("changeCart('p1',1)");assert(a.run('saleError'));assert.equal(a.run('cart[0].cant'),2);
+ a.run("saleCommand('dismiss');checkout()");assert(a.run("$('#modal').open"));
+});
+test('Caja: flechas, signos, Supr y Ctrl+Z operan sin modificadores ni mouse',()=>{
+ const a=app();a.run("scanSale('7790895001234');scanSale('7790895002231')");
+ const target={id:'pos-code',value:'',matches:()=>true},press=(key,extra={})=>a.handlers.keydown({key,target,preventDefault(){},...extra});
+ press('ArrowUp');assert.equal(a.run('saleSelected'),'p1');press('+');assert.equal(a.run('cart[0].cant'),2);press('-');assert.equal(a.run('cart[0].cant'),1);
+ press('Delete');assert.equal(a.run('cart.length'),1);press('z',{ctrlKey:true});assert.equal(a.run('cart.length'),2);assert.equal(a.run('saleSelected'),'p1');
+});
+test('Caja: F3 edita en línea y Esc cancela sin aplicar el número escrito',()=>{
+ const a=app();a.run("scanSale('7790895001234');saleEditQuantity()");assert.equal(a.run('saleEditing'),'p1');assert(!a.run("$('#modal').open"));
+ const target={id:'sale-quantity',dataset:{cartQuantity:'p1'},value:'10',matches:()=>true};a.handlers.keydown({key:'Escape',target,preventDefault(){}});
+ assert.equal(a.run('cart[0].cant'),1);assert.equal(target.value,1);assert.equal(a.run('saleEditing'),null);
+});
+test('Caja: el multiplicador no se aplica a peso y la etiqueta con peso conserva lotes',()=>{
+ const a=app();a.run("saleMultiplier=6;scanSale('P-JAMON')");assert(a.run('saleError'));assert.equal(a.run('cart.length'),0);
+ a.run("saleCommand('dismiss');state.scaleConfig={enabled:true,prefix:'20',length:13,productStart:2,productLength:5,valueStart:7,valueLength:5,mode:'weight',gramsPerDigit:1,checksum:false};scanSale('2000001002500')");
+ assert.equal(a.run('cart[0].cant'),250);assert(!a.run("$('#modal').open"));a.run('checkout()');assert(a.run('modalAction(new Map())'));assert(a.run('state.sales.at(-1).items[0].allocations.length>0'));
+});
+test('Caja: deshacer nunca restaura un carrito de otra revisión',()=>{
+ const a=app();a.run("scanSale('7790895001234');changeCart('p1',1);mutate(s=>{s.products[0].precio+=1;});saleCommand('undo')");assert.equal(a.run('cart[0].cant'),2);
+});
+test('Caja: impresión configurada fuera del cierre, solo después del guardado',()=>{
+ const a=app();a.run("window.prints=0;window.print=()=>window.prints++;saleSetPrint(true);scanSale('7790895001234');checkout()");
+ assert(!a.elements.get('#modal').innerHTML.includes('type="checkbox"'));a.localStorage.fail=true;assert.equal(a.run('modalAction(new Map())'),false);assert.equal(a.run('window.prints'),0);
+ a.localStorage.fail=false;assert(a.run('modalAction(new Map())'));a.run('modalAfterSuccess()');assert.equal(a.run('window.prints'),1);
+ const b=app(Object.fromEntries(a.storage));assert.equal(b.run('salePrintEnabled'),true);assert.equal(b.run('state.sales.at(-1).payment'),'Sin registrar');
+});
 test('renderiza todas las vistas y conserva textos y tablas',()=>{
  const a=app();for(const v of ['home','orders','products','prices','alerts','reports']){a.run("view='"+v+"';render()");const html=a.elements.get('#app').innerHTML;assert(html.length>1000);assert(!html.includes('undefined'));assert(!html.includes('NaN'));}assert(a.run("state.sales.length")>50);
 });
@@ -61,18 +154,18 @@ test('datos ilegibles bloquean escrituras y migración preserva clave original',
  const old=JSON.stringify({products:[{id:'p1',nombre:'Leche',precio:100,stock:3}],sales:[]});
  const a=app({'mi-despensa-demo-v2':old});assert.equal(a.run('state.products.length'),1);assert.equal(a.storage.get('mi-despensa-demo-v2'),old);
 });
-test('CRM: elimina Vender y ofrece Precios y Ventas, con orden detallada visible',()=>{
- const a=app();
- assert(!a.run("navs.some(n=>n[2]==='Vender')"));
- assert(a.run("navs.some(n=>n[2]==='Precios')"));assert(a.run("navs.some(n=>n[2]==='Ventas')"));
- a.run("mutate(s=>Core.sell(s,[{id:'p3',cant:1},{id:'p13',cant:2}],'Efectivo'));render()");
- const html=a.elements.get('#app').innerHTML;
- assert(html.includes('Coca-Cola 2,25 L'));assert(html.includes('Vino tinto Malbec 750 ml'));assert(html.includes('unit-box">2×'));
- assert(html.includes('Consultar detalle'));assert(html.includes('OV-'));
+test('Navegación: Vender dedicado, precios dentro de Productos e historial con detalle',()=>{
+  const a=app();
+  assert(a.run("navs.some(n=>n[2]==='Vender')"));
+  assert(!a.run("navs.some(n=>n[2]==='Precios')"));assert(a.run("productTabs().includes('Precios y costos')"));
+  a.run("mutate(s=>Core.sell(s,[{id:'p3',cant:1},{id:'p13',cant:2}],'Efectivo'));go('orders')");
+  const html=a.elements.get('#app').innerHTML;
+  assert(html.includes('Ver venta'));assert(html.includes('OV-'));assert(!html.includes('Productos más vendidos'));
  const saleId=a.run('state.sales.at(-1).id');
  a.run('detailSale('+JSON.stringify(saleId)+')');
  assert(a.elements.get('#modal').innerHTML.includes('Precio unit.'));
- assert(a.elements.get('#modal').innerHTML.includes('Actividad de la orden'));
+  assert(a.elements.get('#modal').innerHTML.includes('Actividad de la orden'));
+  assert(a.elements.get('#modal').innerHTML.includes('Coca-Cola 2,25 L'));assert(a.elements.get('#modal').innerHTML.includes('Vino tinto Malbec 750 ml'));
 });
 test('CRM: aumento por varios tipos y categorías, sin afectar los demás',()=>{
  const a=app();
@@ -109,8 +202,8 @@ test('CRM 2.1: venta rápida siempre visible antes y después de confirmar',()=>
  assert(!a.elements.get('#app').innerHTML.includes('Ocultar venta'));
  a.run("cart=[{id:'p1',cant:1}];checkout();modalAction(new Map([['payment','Efectivo'],['customerType','Cliente habitual']]));render()");
  assert(a.elements.get('#app').innerHTML.includes('id="pos-search"'));
- assert(a.elements.get('#app').innerHTML.includes('Revisar y confirmar venta'));
- assert.equal(a.run('cart.length'),0);assert.equal(a.run('state.sales.at(-1).customerType'),'Cliente habitual');
+  assert(a.elements.get('#app').innerHTML.includes('Revisar venta'));
+ assert.equal(a.run('cart.length'),0);assert.equal(a.run('state.sales.at(-1).customerType'),'Consumidor final');assert.equal(a.run('state.sales.at(-1).payment'),'Sin registrar');
  const b=app(Object.fromEntries(a.storage));assert(b.elements.get('#app').innerHTML.includes('id="sale-composer"'));
 });
 test('CRM 2.1: costo individual y masivo separados de precio y costo histórico',()=>{
@@ -126,23 +219,23 @@ test('CRM 2.1: costo individual y masivo separados de precio y costo histórico'
  a.handlers.submit({preventDefault(){},target:{dataset:{price:'p1',valueField:'costo'},fields:[['price','0']]}});
  assert.equal(a.run("get('p1').costo"),0);
 });
-test('CRM 2.1: ingreso directo conserva otras cantidades pendientes y separa categorías',()=>{
+test('Stock: listado de consulta y registro de entradas conservan cantidades pendientes',()=>{
  const a=app(),stock=a.run("get('p1').stock");
  a.run("view='products';stockDrafts={p1:'6',p2:'12'};render()");
  const html=a.elements.get('#app').innerHTML;
- assert(html.includes('category-block'));assert(html.includes('<h3>Bebidas</h3>'));assert(html.includes('<h3>Lácteos</h3>'));
- assert(html.includes('data-entry="p1"'));
+  assert(html.includes('Stock actual'));assert(html.includes('Bebidas'));assert(html.includes('Lácteos'));
+  assert(html.includes('Gestionar stock'));assert(!html.includes('data-entry="p1"'));
  a.handlers.submit({preventDefault(){},target:{dataset:{entry:'p1'},fields:[['qty','6']]}});
  assert.equal(a.run("get('p1').stock"),stock+6);assert.equal(a.run("stockDrafts.p1"),undefined);assert.equal(a.run("stockDrafts.p2"),'12');
  assert.equal(a.run("state.movements.at(-1).qty"),6);
  a.handlers.submit({preventDefault(){},target:{dataset:{entry:'p1'},fields:[['qty','-2']]}});
  assert.equal(a.run("get('p1').stock"),stock+6);
 });
-test('CRM 2.1: categorías, tipos, consumidor y motivos son selectores',()=>{
+test('Categorías, tipos y motivos son selectores; cierre sin cliente ni pago',()=>{
  const a=app();a.run('editProduct()');let html=a.elements.get('#modal').innerHTML;
  assert(html.includes('<select name="categoria"'));assert(html.includes('<select name="tipo"'));assert(!html.includes('input name="categoria"'));
  assert(html.includes('<select name="revisionDias"'));
- a.run("cart=[{id:'p1',cant:1}];checkout()");html=a.elements.get('#modal').innerHTML;assert(html.includes('<select name="customerType"'));
+ a.run("cart=[{id:'p1',cant:1}];checkout()");html=a.elements.get('#modal').innerHTML;assert(!html.includes('name="customerType"'));assert(!html.includes('name="payment"'));assert(!html.includes('name="customer"'));assert(!html.includes('type="checkbox"'));
  a.run("stockDialog('p1')");assert(a.elements.get('#modal').innerHTML.includes('<select name="reason"'));
  a.run("cancelSale(state.sales[0].id)");assert(a.elements.get('#modal').innerHTML.includes('<select name="reason"'));
 });
@@ -217,8 +310,9 @@ test('CRM 2.3: escaneos consecutivos agregan unidades por código exacto y recup
  }
  assert(a.run("scanSale('7790895003238')"));assert.equal(a.run('cart.length'),2);
  assert.equal(a.run("scanSale('7790895009')"),false);assert.equal(a.run('cart.length'),2);
- assert(a.elements.get('#app').innerHTML.includes('Dar de alta este producto'));
- assert.equal(a.run("scanSale('7790895009230')"),false);assert.equal(a.run('cart.length'),2);
+  assert(a.elements.get('#app').innerHTML.includes('No se agregó el producto'));assert(a.run('saleError'));
+ a.run("saleCommand('dismiss')");assert.equal(a.run("scanSale('7790895009230')"),false);assert.equal(a.run('cart.length'),2);
+ a.run("saleCommand('dismiss')");
  a.run("scanSale('7790895003238');scanSale('7790895003238');scanSale('7790895003238')");
  assert.equal(a.run("scanSale('7790895003238')"),false);assert.equal(a.run("cart.find(l=>l.id==='p3').cant"),4);
 });
@@ -267,7 +361,7 @@ test('CRM 2.3: fallo de almacenamiento al dar alta conserva el formulario y no c
 });
 
 test('CRM 2.4: catálogo y pedido simultáneos con borrador persistente',()=>{
- const a=app(),stock=a.run("get('p1').stock");a.run("view='alerts';render()");
+  const a=app(),stock=a.run("get('p1').stock");a.run("view='alerts';purchaseTab='compose';render()");
  assert(a.run("navs.some(n=>n[2]==='Pedidos')"));assert(!a.run("navs.some(n=>n[2]==='Avisos')"));
  const html=a.elements.get('#app').innerHTML;assert(html.includes('purchase-catalog'));assert(html.includes('purchase-basket'));
  a.run("purchaseQty('p1',3,true);purchaseQty('p1',2,true);purchaseQty('p2',6,true)");assert.equal(a.run('draftUnits()'),11);assert.equal(a.run('purchaseDraft().items.length'),2);
@@ -275,8 +369,8 @@ test('CRM 2.4: catálogo y pedido simultáneos con borrador persistente',()=>{
  const b=app(Object.fromEntries(a.storage));assert.equal(b.run('draftUnits()'),11);
 });
 test('CRM 2.4: proveedor guardado, confirmación de pedido y PDF descargable sin datos monetarios',()=>{
- const a=app();a.run("supplierDialog();modalAction(new Map([['name','Proveedor Ñandú']]))");
- assert.equal(a.run('purchaseDraft().supplier'),'Proveedor Ñandú');assert.equal(a.run('state.suppliers.length'),1);
+ const a=app(),suppliers=a.run('state.suppliers.length');a.run("supplierDialog();modalAction(new Map([['name','Proveedor Ñandú']]))");
+ assert.equal(a.run('purchaseDraft().supplier'),'Proveedor Ñandú');assert.equal(a.run('state.suppliers.length'),suppliers+1);
  a.run("purchaseQty('p1',4);savePurchaseDialog()");assert.equal(a.run('state.orders.length'),0);assert(a.run('modalAction(new Map())'));
  assert.equal(a.run('state.orders.length'),1);assert.equal(a.run('draftUnits()'),0);assert.equal(a.run('state.orders[0].supplier'),'Proveedor Ñandú');
  assert(a.run('PurchasePDF.build(state.orders[0]).length')>1000);
@@ -298,4 +392,24 @@ test('CRM 2.4: recepción parcial mantiene alerta al intentar sumar stock por ot
  assert.equal(a.run("get('p1').stock"),stock+2);assert.equal(a.run("Core.pendingUnits(state,'p1')"),3);
  a.handlers.submit({preventDefault(){},target:{dataset:{entry:'p1'},fields:[['qty','3']]}});
  assert.equal(a.run("get('p1').stock"),stock+2);assert(a.elements.get('#modal').innerHTML.includes('3 unidades pendientes'));
+});
+test('Ticket: consultar y descargar conserva venta, stock e importes históricos',()=>{
+ const a=app();a.run("cart=[{id:'p1',cant:2}];checkout();modalAction(new Map([['payment','Efectivo']]));mutate(s=>Core.prices(s,['p1'],0,9000));ticketDialog(lastSaleId)");
+ const saved=a.storage.get('trebol-demo-v3');
+ assert(a.elements.get('#modal').innerHTML.includes('$&nbsp;')===false);
+ assert(a.elements.get('#modal').innerHTML.includes('1.450,00'));
+ assert(!a.elements.get('#modal').innerHTML.includes('9.000,00'));
+ a.run('downloadTicket(lastSaleId)');assert.equal(a.storage.get('trebol-demo-v3'),saved);
+ a.run("mutate(s=>Core.cancel(s,lastSaleId,'Prueba'));ticketDialog(lastSaleId)");
+ assert(a.elements.get('#modal').innerHTML.includes('VENTA ANULADA'));
+});
+test('Cantidad editable: rechaza decimales y exceso de stock sin alterar la venta',()=>{
+ const a=app();a.run("cart=[{id:'p1',cant:1}]");
+ for(const value of ['13','1.5','0']){const target={dataset:{cartQuantity:'p1'},value};a.handlers.change({target});assert.equal(a.run('cart[0].cant'),1);assert.equal(target.value,1);}
+ a.handlers.change({target:{dataset:{cartQuantity:'p1'},value:'4'}});assert.equal(a.run('cart[0].cant'),4);
+});
+test('Alta desde código desconocido: vuelve a la venta y agrega sólo al guardar',()=>{
+ const a=app();a.run("scanSale('000NEW');quickCreate(unknownScan)");
+ a.handlers.submit({preventDefault(){},target:{id:'dialog-form',fields:[['codigo','000NEW'],['nombre','Agua nueva'],['categoria','Bebidas'],['tipo','Aguas'],['precio','1000'],['costo','700'],['stock','6']]}});
+ assert.equal(a.run('cart.length'),1);assert.equal(a.run('get(cart[0].id).stock'),6);assert.equal(a.run('cart[0].cant'),1);
 });

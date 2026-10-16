@@ -9,7 +9,7 @@ let storageFault=false, state;
 try {const raw=localStorage.getItem(KEY);state=raw?JSON.parse(raw):localStorage.getItem(OLD_KEY)?Core.migrate(JSON.parse(localStorage.getItem(OLD_KEY))):Core.seed();if(state.version!==3||!Array.isArray(state.products)||!Array.isArray(state.sales))throw Error(); state=Core.upgrade(state);localStorage.setItem(KEY,JSON.stringify(state));}
 catch {storageFault=true;state=Core.upgrade(Core.seed());}
 let view='home',cart=[],query='',category='all',stockFilter='all',selected=new Set(),period='day',anchor=Core.dateKey(new Date()),reportCategory='all',paymentFilter='all',historyFilter='all',historyAll=false,historyQuery='',alertFilter='due',timer,modalAction,modalAfterSuccess=null;
-const navs=[['home','I','Inicio'],['orders','O','Ventas'],['products','D','Depósito'],['prices','P','Precios'],['alerts','A','Pedidos'],['reports','R','Reportes']];
+const navs=[['home','I','Vender'],['products','D','Productos'],['alerts','A','Pedidos'],['orders','O','Ventas'],['reports','R','Reportes']];
 function notify(message){const t=$('#toast');clearTimeout(timer);t.textContent=message;t.hidden=false;t.classList.add('show');timer=setTimeout(()=>{t.hidden=true;t.classList.remove('show');},4200);}
 function mutate(fn){
   if(storageFault){notify('No se pudo abrir el guardado local. No se registraron cambios. Revisá el almacenamiento del navegador.');return false;}
@@ -21,7 +21,7 @@ function mutate(fn){
   }catch(e){notify(e.name==='QuotaExceededError'?'No se pudo guardar: almacenamiento lleno. No se registró la operación.':e.message);return false;}
 }
 function modal(title,body,confirm,action,danger=false){
-  $('#modal').close();$('#modal').classList.remove('drawer');modalAction=action;modalAfterSuccess=null;scanBurst='';
+  $('#modal').close();$('#modal').classList.remove('drawer');modalAction=action;modalAfterSuccess=null;scanBurst='';saleDialog='';
   $('#modal').innerHTML='<form id="dialog-form"><header class="modal-heading"><h2 id="modal-title">'+title+'</h2><button type="button" class="text-btn" data-action="close" aria-label="Cerrar">Cerrar</button></header>'+body+'<p id="modal-error" role="alert"></p><div class="modal-actions">'+btn('Volver','close')+'<button class="button '+(danger?'danger':'primary')+'" id="modal-submit" type="submit">'+confirm+'</button></div></form>';
   $('#modal').showModal();
 }
@@ -33,9 +33,7 @@ function select(label,id,list,value,all){return '<label class="field compact">'+
 const get=id=>state.products.find(p=>p.id===id);
 const norm=s=>String(s).normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase();
 function matches(p,q){return norm(p.nombre+' '+p.codigo).includes(norm(q));}
-function total(){return Core.money(cart.reduce((a,l)=>a+get(l.id).precio*l.cant,0));}
 function stats(cards){return '<div class="stats">'+cards.map(([label,value,note])=>'<article class="stat"><span>'+label+'</span><strong>'+value+'</strong>'+(note?'<small>'+note+'</small>':'')+'</article>').join('')+'</div>';}
-function cartLines(){return cart.map(l=>'<div class="basket-line"><div><strong>'+esc(get(l.id).nombre)+'</strong><small>'+cash(get(l.id).precio)+' por unidad</small></div><strong>'+cash(get(l.id).precio*l.cant)+'</strong><div class="quantity">'+btn('−','qty','data-id="'+l.id+'" data-delta="-1" aria-label="Quitar una unidad de '+esc(get(l.id).nombre)+'"')+'<span>'+l.cant+'</span>'+btn('+','qty','data-id="'+l.id+'" data-delta="1" aria-label="Agregar una unidad de '+esc(get(l.id).nombre)+'"')+'</div></div>').join('')||'<div class="empty cart-placeholder"><span class="empty-mark">V</span><strong>Empezá una venta</strong><p>Buscá un producto y tocá para agregarlo.</p></div>';}
 function reports(){
  const r=Core.range(period,new Date(anchor+'T12:00:00')),data=Core.report(state,r,reportCategory,paymentFilter);
  const ps=state.products.filter(p=>reportCategory==='all'||p.categoria===reportCategory);
@@ -67,13 +65,13 @@ function purchaseBasket(){
  return '<section class="panel purchase-basket"><div class="block-heading"><div><h3>Tu pedido <span class="count">'+d.items.length+'</span></h3><p>Se guarda como borrador mientras lo armás.</p></div></div><div class="supplier-choice">'+formSelect('Proveedor','supplier',[['','Elegir proveedor'],['Sin especificar','Sin especificar'],...state.suppliers],d.supplier,'id="purchase-supplier"')+btn('Agregar proveedor','supplier-add')+'</div><div class="purchase-lines">'+d.items.map(l=>{const p=get(l.productId);return '<div class="purchase-line"><div><strong>'+esc(p?.nombre||'Producto no disponible')+'</strong><small>'+esc(p?.codigo||'')+'</small></div><div class="purchase-line-controls">'+btn('−','purchase-minus','data-id="'+esc(l.productId)+'" aria-label="Restar una unidad a '+esc(p?.nombre)+'"')+'<input data-purchase-line="'+esc(l.productId)+'" type="number" min="1" max="1000000000" step="1" value="'+l.qty+'" aria-label="Cantidad solicitada de '+esc(p?.nombre)+'">'+btn('+','purchase-plus','data-id="'+esc(l.productId)+'" aria-label="Sumar una unidad a '+esc(p?.nombre)+'"')+btn('Quitar','purchase-remove','data-id="'+esc(l.productId)+'"')+'</div></div>';}).join('')+(!d.items.length?'<div class="empty"><strong>Agregá productos al pedido</strong><p>Indicá las cantidades desde el catálogo.</p></div>':'')+'</div><details class="optional-field" '+(d.note?'open':'')+'><summary>Observaciones para el proveedor</summary><label class="field">Mensaje opcional<textarea id="purchase-note" maxlength="500" rows="3" placeholder="Ej.: entregar por la mañana">'+esc(d.note)+'</textarea></label></details><div class="basket-total"><span>'+d.items.length+' productos</span><strong id="purchase-draft-total">'+draftUnits()+' u.</strong></div><p class="muted">El PDF incluye productos, códigos y cantidades. No incluye precios ni costos.</p>'+btn('Revisar, guardar y generar PDF','purchase-save',d.items.length?'':'disabled',true)+btn('Vaciar borrador','purchase-clear',d.items.length||d.note?'':'disabled')+'</section>';
 }
 function purchaseHistoryRows(){
- const list=state.orders.filter(o=>(purchaseHistoryStatus==='all'||o.status===purchaseHistoryStatus)&&norm(Core.purchaseNumber(o)+' '+o.supplier+' '+Core.purchaseItems(o).map(l=>l.nombre).join(' ')).includes(norm(purchaseHistoryQuery))).slice().reverse();
+  const list=state.orders.filter(o=>(purchaseHistoryStatus==='all'||purchaseHistoryStatus==='open'&&Core.openPurchase(o)||o.status===purchaseHistoryStatus)&&norm(Core.purchaseNumber(o)+' '+o.supplier+' '+Core.purchaseItems(o).map(l=>l.nombre).join(' ')).includes(norm(purchaseHistoryQuery))).slice().reverse();
  return list.map(o=>{const lines=Core.purchaseItems(o);return '<article class="panel purchase-history-card"><header><div><span class="eyebrow">PEDIDO AL PROVEEDOR</span><h3>'+Core.purchaseNumber(o)+'</h3></div>'+purchasePill(o)+'</header><strong>'+esc(o.supplier)+'</strong><p class="muted">'+fmtDate(o.at)+' · '+lines.length+' productos · '+lines.reduce((a,l)=>a+l.qty,0)+' unidades solicitadas</p><div class="purchase-history-lines">'+lines.slice(0,3).map(l=>'<div class="simple-row"><span>'+esc(l.nombre)+'</span><strong>'+l.qty+' u.</strong></div>').join('')+(lines.length>3?'<p class="muted">Y '+(lines.length-3)+' productos más. Consultá el detalle.</p>':'')+'</div><div class="row-actions">'+btn('Ver detalle','purchase-detail','data-id="'+o.id+'"')+btn('Descargar PDF','purchase-pdf','data-id="'+o.id+'"')+btn('Repetir pedido','purchase-repeat','data-id="'+o.id+'"')+'</div></article>';}).join('')||'<p class="empty panel">No hay pedidos guardados para estos filtros.</p>';
 }
 function purchases(){
  const count=state.orders.filter(Core.openPurchase).length;
- return '<div class="workspace-heading"><div><h2>Pedidos a proveedores</h2><p>Armá la lista, guardala y descargá el PDF para compartir.</p></div></div><div class="section-tabs">'+chip('Armar pedido','purchase-tab','compose',purchaseTab)+chip('Historial ('+state.orders.length+')','purchase-tab','history',purchaseTab)+'</div>'+
- (purchaseTab==='history'?'<section class="panel"><div class="toolbar"><label class="field grow">Buscar pedido, proveedor o producto<input id="purchase-history-query" type="search" value="'+esc(purchaseHistoryQuery)+'" placeholder="PC-00001 o nombre del proveedor"></label></div><div class="chips">'+[['all','Todos'],['pending','Pendientes'],['partial','Parciales'],['received','Recibidos'],['cancelled','Cancelados']].map(([v,l])=>chip(l,'purchase-status',v,purchaseHistoryStatus)).join('')+'</div><p class="muted">'+count+' pedidos pendientes de recepción. Repetir crea un nuevo borrador editable.</p></section><div id="purchase-history" class="purchase-history-grid">'+purchaseHistoryRows()+'</div>':
+  return '<div class="workspace-heading"><div><h2>Pedidos a proveedores</h2><p>La mercadería se suma al stock cuando registrás su recepción.</p></div></div><div class="section-tabs">'+chip('Pedidos guardados','purchase-tab','history',purchaseTab)+chip(purchaseDraft().items.length?'Continuar borrador ('+purchaseDraft().items.length+')':'Nuevo pedido','purchase-tab','compose',purchaseTab)+'</div>'+
+  (purchaseTab==='history'?'<section class="panel"><div class="toolbar"><label class="field grow">Buscar pedido, proveedor o producto<input id="purchase-history-query" type="search" value="'+esc(purchaseHistoryQuery)+'" placeholder="PC-00001 o nombre del proveedor"></label></div><div class="chips">'+[['open','Por recibir'],['all','Todos'],['pending','Pendientes'],['partial','Parciales'],['received','Recibidos'],['cancelled','Cancelados']].map(([v,l])=>chip(l,'purchase-status',v,purchaseHistoryStatus)).join('')+'</div><p class="muted">'+count+' pedidos pendientes de recepción. Repetir crea un nuevo borrador editable.</p></section><div id="purchase-history" class="purchase-history-grid">'+purchaseHistoryRows()+'</div>':
  '<div class="purchase-layout"><section class="panel purchase-catalog"><h3>Elegí productos y cantidades</h3><div class="toolbar"><label class="field grow">Buscar producto<input id="purchase-search" type="search" value="'+esc(purchaseQuery)+'" placeholder="Nombre o código"></label>'+select('Categoría','purchase-category',categories(),purchaseCategory)+'</div><div class="chips">'+chip('Todos','purchase-filter','all',purchaseFilter)+chip('Con sugerencia','purchase-filter','suggested',purchaseFilter)+chip('Sin stock','purchase-filter','zero',purchaseFilter)+'</div><details class="model-help"><summary>Cómo se calcula la sugerencia</summary><p>Modelo P: demanda durante la revisión y la entrega, más stock de seguridad, menos existencias y cantidades pendientes de recibir. La sugerencia es orientativa; vos elegís cuánto pedir.</p><p>Stock de seguridad = z × desviación diaria × raíz(días de revisión + entrega). Los parámetros se consultan y ajustan desde la ficha del producto. La demanda observada puede subestimar las necesidades si hubo faltantes.</p></details><div id="purchase-catalog">'+purchaseCatalog()+'</div></section>'+purchaseBasket()+'</div>');
 }
 function supplierDialog(){
@@ -141,23 +139,26 @@ const icon = name => {
 let productType='all',homeStatus='all',ordersRange='today',ordersDate=Core.dateKey(new Date()),ordersStatus='all',ordersPayment='all',ordersQuery='',ordersPage=1,bulkDraft=null;
 let ordersCategory='all',ordersSort='units',ordersShowAll=false;
 let scanFeedback='',unknownScan='',scanBurst='',scanLastKey=0,scanBlockedUntil=0,quickDefaults={categoria:'Almacén',tipo:'General'};
-let purchaseTab='compose',purchaseQuery='',purchaseCategory='all',purchaseFilter='all',purchaseHistoryStatus='all',purchaseHistoryQuery='',purchaseQtyDrafts={};
+let purchaseTab='history',purchaseQuery='',purchaseCategory='all',purchaseFilter='all',purchaseHistoryStatus='open',purchaseHistoryQuery='',purchaseQtyDrafts={};
+let lastSaleId=null;
 const orderNumber = s => 'OV-'+String(s.number||state.sales.indexOf(s)+1).padStart(5,'0');
 function types(cat=category){return [...new Set(state.products.filter(p=>cat==='all'||p.categoria===cat).map(p=>p.tipo))].sort();}
 function go(name){view=name;query='';render();window.scrollTo(0,0);}
 function render(){
  if(view==='sell')view='home';
- document.querySelectorAll('nav').forEach(el=>el.innerHTML=navs.map(([key,unused,label])=>'<button class="nav-item '+(view===key?'is-active':'')+'" data-nav="'+key+'" '+(view===key?'aria-current="page"':'')+'><span class="nav-icon">'+icon(key)+'</span><span class="nav-label">'+label+'</span></button>').join(''));
- $('#page-title').textContent=navs.find(n=>n[0]===view)[2];
- $('#page-subtitle').textContent={home:'Operación diaria y seguimiento de cada venta.',orders:'Resultados, productos vendidos y detalle de cada compra.',products:'Catálogo, existencias y movimientos de mercadería.',prices:'Venta y costo: edición rápida por producto o por grupo.',alerts:'Armá pedidos, descargá la lista y registrá la recepción.',reports:'Resultados comerciales e inventario por período.'}[view];
- $('#app').innerHTML=(storageFault?'<p class="notice danger-text">No se pudo leer el almacenamiento. Las operaciones están bloqueadas para proteger los datos.</p>':'')+({home,orders:ordersView,products:depot,prices:pricesView,alerts:purchases,reports}[view])();
- focusScanner();
+  const active=view==='prices'?'products':view;
+  document.querySelectorAll('nav').forEach(el=>el.innerHTML=navs.map(([key,unused,label])=>'<button class="nav-item '+(active===key?'is-active':'')+'" data-nav="'+key+'" '+(active===key?'aria-current="page"':'')+'><span class="nav-icon">'+icon(key)+'</span><span class="nav-label">'+label+'</span>'+(key==='home'&&cart.length?'<span class="nav-count">'+cart.reduce((n,l)=>n+l.cant,0)+'</span>':'')+'</button>').join(''));
+  $('#page-title').textContent=navs.find(n=>n[0]===active)[2];
+  $('#page-subtitle').textContent={home:'Escaneá, revisá y registrá la venta.',orders:'Consultá tus ventas y recuperá cualquier ticket.',products:'Tu mercadería, siempre en orden.',prices:'Actualizá precios y costos con una vista previa.',alerts:'Prepará pedidos y registrá la mercadería que llega.',reports:'Una mirada clara a los resultados del negocio.'}[view];
+  $('#app').innerHTML=(storageFault?'<p class="notice danger-text">No se pudo leer el almacenamiento. Las operaciones están bloqueadas para proteger los datos.</p>':'')+(view==='prices'?productTabs():'')+({home,orders:ordersView,products:depot,prices:pricesView,alerts:purchases,reports:()=>reports()+reportInsights()}[view])();
+  if(view==='home')saleAfterRender();
+  focusScanner();
 }
 function statLink(label,value,note,action){return '<button class="stat stat-link" data-action="'+action+'"><span>'+label+'</span><strong>'+value+'</strong><small>'+note+' '+icon('arrow')+'</small></button>';}
 function orderCards(sales){
  return sales.map(s=>'<article class="order-card '+(s.status==='cancelled'?'is-cancelled':'')+'"><header class="order-card-head"><div><span class="order-caption">ORDEN DE VENTA</span><h3>'+esc(orderNumber(s))+'</h3></div><span class="pill '+(s.status==='confirmed'?'green':'red')+'">'+(s.status==='confirmed'?'Confirmada':'Anulada')+'</span></header><div class="order-meta"><span>'+fmtDate(s.at)+'</span><span>'+esc(s.payment)+'</span></div><p class="order-customer">'+esc(s.customer||'Consumidor final')+'</p><div class="order-items">'+s.items.map(l=>'<div class="order-item"><span class="unit-box">'+l.cant+'×</span><div><strong>'+esc(l.nombre)+'</strong><small>'+cash(l.precio)+' por unidad</small></div><span>'+cash(l.precio*l.cant)+'</span></div>').join('')+'</div><div class="order-total"><small>'+s.items.reduce((a,l)=>a+l.cant,0)+' unidades · '+s.items.length+' productos</small><div><small>Total de la orden</small><strong>'+cash(s.total)+'</strong></div></div><footer>'+btn('Consultar detalle '+icon('arrow'),'sale-detail','data-id="'+s.id+'"')+(s.status==='confirmed'?btn('Anular','cancel-sale','data-id="'+s.id+'"'):'<small>Anulación registrada</small>')+'</footer></article>').join('')||'<div class="empty orders-empty">'+icon('orders')+'<strong>No hay órdenes para mostrar</strong><p>Las ventas confirmadas aparecerán con sus productos, cantidades y total.</p></div>';
 }
-function saleHistory(sales){return '<div class="order-grid">'+orderCards(sales)+'</div>';}
+function saleHistory(sales){return '<details class="report-sale-history"><summary>Ver detalle de las '+sales.length+' ventas</summary><div class="order-grid">'+orderCards(sales)+'</div></details>';}
 function ordersPeriod(){
  return ordersRange==='all'?null:Core.range(ordersRange==='week'?'week':ordersRange==='month'?'month':'day',new Date((ordersRange==='date'?ordersDate:Core.dateKey(new Date()))+'T12:00:00'));
 }
@@ -171,8 +172,8 @@ function orderMatches(){
  return state.sales.filter(s=>(!r||Core.within(s.at,r))&&(ordersStatus==='all'||s.status===ordersStatus)&&(ordersPayment==='all'||s.payment===ordersPayment)&&(ordersCategory==='all'||s.items.some(l=>l.categoria===ordersCategory))&&norm(orderNumber(s)+' '+(s.customer||'')+' '+s.items.map(l=>l.nombre).join(' ')).includes(norm(ordersQuery))).slice().reverse();
 }
 function ordersResults(){
- const all=orderMatches(),pages=Math.max(1,Math.ceil(all.length/12));ordersPage=Math.min(ordersPage,pages);
- return '<div class="list-summary"><span>'+all.length+' órdenes encontradas</span><span>Total de órdenes confirmadas: <strong>'+cash(all.filter(s=>s.status==='confirmed').reduce((a,s)=>a+s.total,0))+'</strong></span></div><div class="order-grid">'+orderCards(all.slice((ordersPage-1)*12,ordersPage*12))+'</div><div class="pagination">'+btn('Anterior','orders-prev',ordersPage===1?'disabled':'')+'<span>Página '+ordersPage+' de '+pages+'</span>'+btn('Siguiente','orders-next',ordersPage>=pages?'disabled':'')+'</div>';
+  const all=orderMatches(),pages=Math.max(1,Math.ceil(all.length/12));ordersPage=Math.min(ordersPage,pages);
+  return '<div class="list-summary"><span>'+all.length+' ventas encontradas</span><span>Total confirmado del filtro: <strong>'+cash(all.filter(s=>s.status==='confirmed').reduce((a,s)=>a+s.total,0))+'</strong></span></div><div class="table-wrap panel flush"><table><thead><tr><th>Venta</th><th>Fecha y hora</th><th>Medio de pago</th><th>Estado</th><th class="numeric">Total</th><th>Detalle</th></tr></thead><tbody>'+all.slice((ordersPage-1)*12,ordersPage*12).map(s=>'<tr><td><strong>'+orderNumber(s)+'</strong><small>'+s.items.length+' productos</small></td><td>'+fmtDate(s.at)+'</td><td>'+esc(s.payment)+'</td><td><span class="pill '+(s.status==='confirmed'?'green':'red')+'">'+(s.status==='confirmed'?'Confirmada':'Anulada')+'</span></td><td class="numeric"><strong>'+cash(s.total)+'</strong></td><td>'+btn('Ver venta','sale-detail','data-id="'+s.id+'"')+'</td></tr>').join('')+'</tbody></table>'+(!all.length?'<div class="empty"><strong>No hay ventas para estos filtros</strong><p>Probá otra fecha o buscá por número o producto.</p></div>':'')+'</div><div class="pagination">'+btn('Anterior','orders-prev',ordersPage===1?'disabled':'')+'<span>Página '+ordersPage+' de '+pages+'</span>'+btn('Siguiente','orders-next',ordersPage>=pages?'disabled':'')+'</div>';
 }
 function ordersAnalytics(){
  const data=Core.report(state,ordersPeriod(),ordersCategory,ordersPayment),rows=data.top.slice().sort((a,b)=>b[ordersSort]-a[ordersSort]||b.units-a.units||a.nombre.localeCompare(b.nombre));
@@ -184,16 +185,17 @@ function ordersAnalytics(){
  '<div class="report-grid sales-block"><section class="panel"><h3>Ventas por categoría</h3>'+[...byCategory].sort((a,b)=>b[1].total-a[1].total).map(([cat,r])=>'<div class="simple-row"><span>'+esc(cat)+'<small>'+r.units+' unidades vendidas</small></span><strong>'+cash(r.total)+'</strong></div>').join('')+(!data.tickets?'<p class="empty">Sin ventas para este período.</p>':'')+'</section><section class="panel"><h3>Inventario disponible hoy</h3><div class="simple-row"><span>Unidades disponibles</span><strong>'+ps.reduce((a,p)=>a+p.stock,0)+' u.</strong></div><div class="simple-row"><span>Valor a costo actual</span><strong>'+cash(ps.reduce((a,p)=>a+p.stock*p.costo,0))+'</strong></div><div class="simple-row"><span>Productos sin stock</span><strong>'+ps.filter(p=>p.stock===0).length+'</strong></div><p class="muted">Inventario actual de la categoría. No depende de la fecha ni del medio de pago elegidos.</p></section></div>';
 }
 function ordersView(){
- const cats=[...new Set([...categories(),...state.sales.flatMap(s=>s.items.map(l=>l.categoria))])].sort();
- return '<section class="panel orders-filters sales-block"><div class="section-head"><div><span class="eyebrow">VENTAS Y RESULTADOS</span><h2>Tu actividad comercial</h2></div>'+btn(icon('plus')+' Nueva venta','new-sale','',true)+'</div><div class="chips">'+chip('Hoy','orders-range','today',ordersRange)+chip('Esta semana','orders-range','week',ordersRange)+chip('Este mes','orders-range','month',ordersRange)+chip('Elegir fecha','orders-range','date',ordersRange)+chip('Todo el historial','orders-range','all',ordersRange)+'</div><div class="toolbar">'+(ordersRange==='date'?'<label class="field compact">Fecha<input id="orders-date" type="date" value="'+ordersDate+'"></label>':'')+select('Categoría','orders-category',cats,ordersCategory)+select('Medio de pago','orders-payment',['Efectivo','Transferencia','Tarjeta','Sin registrar'],ordersPayment,'Todos los medios')+'</div>'+(ordersCategory!=='all'?'<p class="notice">El resumen incluye sólo los productos de '+esc(ordersCategory)+'. Abajo se muestran completas las órdenes que los contienen.</p>':'')+'</section>'+ordersAnalytics()+'<section class="sales-block"><div class="block-heading"><div><h2>Órdenes de venta</h2><p>Buscá una compra y consultá todos sus productos.</p></div></div><div class="panel orders-filters"><div class="toolbar"><label class="field grow">Buscar orden, producto o cliente<input id="orders-search" type="search" value="'+esc(ordersQuery)+'" placeholder="Ej.: OV-00012, Coca-Cola…"></label>'+select('Estado de la orden','orders-status',['Confirmadas','Anuladas'],ordersStatus==='confirmed'?'Confirmadas':ordersStatus==='cancelled'?'Anuladas':'all','Todos los estados')+'</div><p class="muted">La búsqueda y el estado filtran las órdenes. El resumen superior mantiene el período, la categoría y el medio de pago.</p></div><div id="orders-results">'+ordersResults()+'</div></section>';
+  const cats=[...new Set([...categories(),...state.sales.flatMap(s=>s.items.map(l=>l.categoria))])].sort();
+  return '<div class="workspace-heading"><div><h2>Historial de ventas</h2><p>El detalle y el ticket de cada compra, en un solo lugar.</p></div>'+btn(icon('plus')+' Nueva venta','new-sale','',true)+'</div><section class="panel orders-filters"><div class="chips">'+chip('Hoy','orders-range','today',ordersRange)+chip('Esta semana','orders-range','week',ordersRange)+chip('Este mes','orders-range','month',ordersRange)+chip('Elegir fecha','orders-range','date',ordersRange)+chip('Todo el historial','orders-range','all',ordersRange)+'</div><div class="toolbar"><label class="field grow">Buscar venta, producto o cliente<input id="orders-search" type="search" value="'+esc(ordersQuery)+'" placeholder="Número de venta, nombre o producto"></label>'+select('Estado','orders-status',['Confirmadas','Anuladas'],ordersStatus==='confirmed'?'Confirmadas':ordersStatus==='cancelled'?'Anuladas':'all','Todos')+(ordersRange==='date'?'<label class="field compact">Fecha<input id="orders-date" type="date" value="'+ordersDate+'"></label>':'')+'</div><details class="optional-field"><summary>Filtrar por categoría o medio de pago</summary><div class="toolbar">'+select('Categoría','orders-category',cats,ordersCategory)+select('Medio de pago','orders-payment',['Efectivo','Transferencia','Tarjeta','Sin registrar'],ordersPayment,'Todos')+'</div><p class="muted">Se muestran las ventas completas que contienen productos de la categoría elegida.</p></details></section><div id="orders-results">'+ordersResults()+'</div>';
 }
 function detailSale(sid){
  const s=state.sales.find(s=>s.id===sid);if(!s)return;
  $('#modal').classList.add('drawer');
  $('#modal').innerHTML='<div class="detail-sheet"><header class="modal-heading"><div><span class="eyebrow">FICHA DE LA ORDEN</span><h2 id="modal-title">'+esc(orderNumber(s))+'</h2></div>'+btn('Cerrar','close')+'</header><span class="pill '+(s.status==='confirmed'?'green':'red')+'">'+(s.status==='confirmed'?'Confirmada':'Anulada')+'</span><div class="detail-grid"><div><small>Fecha y hora</small><strong>'+fmtDate(s.at)+'</strong></div><div><small>Medio de pago</small><strong>'+esc(s.payment)+'</strong></div><div><small>Cliente / referencia</small><strong>'+esc(s.customer||'Consumidor final')+'</strong><small>'+esc(s.customerType||'Sin tipo registrado')+'</small></div><div><small>Unidades</small><strong>'+s.items.reduce((a,l)=>a+l.cant,0)+'</strong></div></div><h3>Productos de la compra</h3><div class="table-wrap"><table><thead><tr><th>Producto</th><th>Cant.</th><th>Precio unit.</th><th>Subtotal</th></tr></thead><tbody>'+s.items.map(l=>'<tr><td>'+esc(l.nombre)+'<small>'+esc(l.categoria)+' / '+esc(l.tipo||'General')+'</small></td><td>'+l.cant+'</td><td>'+cash(l.precio)+'</td><td>'+cash(l.precio*l.cant)+'</td></tr>').join('')+'</tbody></table></div><div class="basket-total"><span>Total de la orden</span><strong>'+cash(s.total)+'</strong></div>'+(s.note?'<div class="notice"><strong>Observaciones</strong><p>'+esc(s.note)+'</p></div>':'')+'<h3 class="spaced">Actividad de la orden</h3><div class="timeline"><div><strong>Venta confirmada</strong><small>'+fmtDate(s.at)+' · '+s.items.reduce((a,l)=>a+l.cant,0)+' unidades descontadas del stock</small></div>'+(s.status==='cancelled'?'<div><strong>Venta anulada</strong><small>'+fmtDate(s.cancelledAt)+' · Stock restituido</small><p>'+esc(s.reason)+'</p></div>':'')+'</div><p class="muted">Los precios corresponden al momento de la venta. No cambian al actualizar el catálogo.</p><div class="modal-actions">'+btn('Imprimir detalle','print-sale','data-id="'+s.id+'"')+(s.status==='confirmed'?btn('Anular esta venta','cancel-sale','data-id="'+s.id+'"'):'')+'</div></div>';
- $('#modal').showModal();
+  $('#modal').innerHTML+='<div class="ticket-actions">'+btn('Ver ticket','ticket','data-id="'+s.id+'"',true)+btn('Descargar ticket PDF','ticket-pdf','data-id="'+s.id+'"')+'</div>';
+  $('#modal').showModal();
 }
-function filteredProducts(){return state.products.filter(p=>matches(p,query)&&(category==='all'||p.categoria===category)&&(productType==='all'||p.tipo===productType)&&(stockFilter==='all'||(stockFilter==='zero'?p.stock===0:Core.replenishment(state,p).critical)));}
+function filteredProducts(){return state.products.filter(p=>matches(p,query)&&(category==='all'||p.categoria===category)&&(productType==='all'||p.tipo===productType)&&(view==='prices'||stockFilter==='all'||(stockFilter==='zero'?p.stock===0:Core.replenishment(state,p).critical)));}
 function catalogToolbar(){return '<div class="toolbar"><label class="field grow">Buscar producto<input id="depot-search" type="search" placeholder="Nombre o código" value="'+esc(query)+'"></label>'+select('Categoría','category',categories(),category)+select('Tipo de producto','product-type',types(),productType,'Todos los tipos')+'</div>';}
 function detailProduct(pid){
  const p=get(pid),r=Core.replenishment(state,p),sales=state.sales.filter(s=>s.status==='confirmed').flatMap(s=>s.items.filter(l=>l.id===pid)),hist=state.priceHistory.filter(h=>h.productId===pid).slice(-8).reverse();
@@ -232,43 +234,25 @@ function shortcuts(target,values,mode='add'){
  return '<div class="quick-picks">'+values.map(n=>btn((mode==='add'?'+':'')+n+(target==='bulk-pct'?'%':''),'quick-pick','data-target="'+target+'" data-value="'+n+'" data-mode="'+mode+'"')).join('')+'</div>';
 }
 function home(){
- const today=Core.range('day'),r=Core.report(state,today),all=state.sales.filter(s=>Core.within(s.at,today)),visible=all.filter(s=>homeStatus==='all'||s.status===homeStatus).slice().reverse();
- return '<section id="sale-composer" class="home-block"><div class="block-heading"><div><h2>Venta rápida</h2><p>Elegí productos y confirmá la compra.</p></div></div>'+pos()+'</section><section class="home-block"><div class="block-heading"><div><h2>Resumen de hoy</h2><p>'+new Date().toLocaleDateString('es-AR',{weekday:'long',day:'numeric',month:'long'})+'</p></div>'+btn('Ver reportes','open-reports')+'</div><div class="stats home-stats">'+statLink('Total vendido',cash(r.total),'Ver órdenes de hoy','today-orders')+statLink('Ventas confirmadas',r.tickets,all.filter(s=>s.status==='cancelled').length+' anuladas','today-orders')+statLink('Unidades vendidas',r.units,'Ver productos vendidos','today-orders')+'</div></section><section class="home-block"><div class="block-heading"><div><h2>Ventas de hoy <span class="count">'+all.length+'</span></h2><p>Cada compra con su detalle y total.</p></div>'+btn('Ver historial completo','history')+'</div><div class="chips">'+chip('Todas','home-status','all',homeStatus)+chip('Confirmadas','home-status','confirmed',homeStatus)+chip('Anuladas','home-status','cancelled',homeStatus)+'</div><div class="order-grid home-orders">'+orderCards(visible)+'</div></section>';
+  const last=state.sales.find(s=>s.id===lastSaleId);
+  return (last?'<div class="sale-success" role="status"><div><strong>Venta registrada · '+orderNumber(last)+'</strong><span>'+cash(last.total)+' · Ya podés escanear la siguiente compra.</span></div><div class="row-actions">'+btn('Ver ticket','ticket','data-id="'+last.id+'"')+btn('Descargar PDF','ticket-pdf','data-id="'+last.id+'"')+'</div></div>':'')+'<section id="sale-composer">'+pos()+'</section>';
 }
 function focusScanner(){
- if(view==='home'&&!$('#modal').open)$('#pos-code')?.focus({preventScroll:true});
-}
-function changeCart(pid,delta=1){
- const p=get(pid),line=cart.find(l=>l.id===pid);
- if(!p){notify('No se encontró el producto.');return false;}
- if(delta>0&&(line?.cant||0)+delta>p.stock){notify(p.stock===0?'Sin stock: no se puede vender este producto.':'Stock insuficiente: ya agregaste todas las unidades disponibles.');return false;}
- if(line)line.cant+=delta;else if(delta>0)cart.push({id:pid,cant:delta});
- cart=cart.filter(l=>l.cant>0);return true;
-}
-function scanSale(raw){
- if(view!=='home'||$('#modal').open)return false;
- const code=String(raw||'').trim();if(!code){focusScanner();return false;}
- const matches=state.products.filter(p=>String(p.codigo)===code);
- $('#pos-code').value='';query='';
- if(matches.length!==1){
-  unknownScan=matches.length===0&&code.length<=40?code:'';
-  scanFeedback=matches.length?'Código duplicado: revisá el catálogo.':'Código no registrado: '+code;
-  render();notify(scanFeedback);return false;
- }
- unknownScan='';const p=matches[0],ok=changeCart(p.id);
- scanFeedback=ok?p.nombre+' · '+cart.find(l=>l.id===p.id).cant+' en la orden':p.nombre+' · No quedan unidades disponibles para agregar.';
- render();return ok;
-}
-function pos(){
- return '<div class="pos-layout"><section class="panel"><h3>1. Agregá productos</h3><div class="scanner-box"><form id="scanner-form"><label class="field">Escanear código de barras<input id="pos-code" name="code" type="text" autocomplete="off" spellcheck="false" maxlength="40" placeholder="Listo para escanear…" aria-describedby="scanner-help scan-feedback"></label><button class="button" type="submit">Agregar código</button></form><p id="scanner-help">Cada lectura agrega 1 unidad a la orden. También podés escribir el código y presionar Enter.</p><details class="scanner-instructions"><summary>Preparar el lector</summary><p>Usá el lector en modo teclado, con Enter al final de cada lectura. El código debe estar cargado en el catálogo. Al volver a Inicio, el campo queda listo para escanear.</p></details><p id="scan-feedback" role="status" aria-live="polite">'+esc(scanFeedback||'Escaneá el primer producto para comenzar.')+'</p>'+(unknownScan?btn('Dar de alta este producto','create-scanned'):'')+'</div><div class="toolbar"><label class="field grow">O buscar por nombre<input id="pos-search" type="search" placeholder="Nombre o código…" value="'+esc(query)+'" autocomplete="off"></label>'+select('Categoría','sale-category',categories(),saleCategory,'Todas')+'</div><div id="pos-results">'+productResults()+'</div></section><section class="panel basket"><h3>2. Revisá la compra <span class="count">'+cart.reduce((a,l)=>a+l.cant,0)+'</span></h3><div id="cart-lines">'+cartLines()+'</div><div class="basket-total"><span>Total</span><strong>'+cash(total())+'</strong></div>'+btn('Revisar y confirmar venta','checkout',cart.length?'':'disabled',true)+btn('Vaciar carrito','clear',cart.length?'':'disabled')+'</section></div>';
+ if(view==='home'&&!$('#modal').open&&!salePrinting)$('#pos-code')?.focus({preventScroll:true});
 }
 function scannerKeydown(e){
+ if(saleKeyboard(e))return;
  if(e.isComposing||e.ctrlKey||e.metaKey||e.altKey)return;
  const target=e.target,now=e.timeStamp||Date.now();
  // Scanner bursts must never submit an open confirmation or product form.
  if($('#modal').open){
   if(e.key.length===1){scanBurst=now-scanLastKey<80?scanBurst+e.key:e.key;scanLastKey=now;}
   if(e.key==='Enter'){
+   if(['weight','quantity'].includes(saleDialog)){
+    const value=String(target.value||'');
+    if(state.products.some(p=>p.codigo===value)||/^\d{8,}$/.test(value)){e.preventDefault();target.value='';notify('Lectura ignorada. Ingresá la cantidad o el peso.');}
+    scanBurst='';return;
+   }
    const burst=scanBurst.length>=4&&now-scanLastKey<120;scanBurst='';
    if(now<scanBlockedUntil){e.preventDefault();return;}
    if(target.id==='quick-code'){e.preventDefault();scanBlockedUntil=now+500;lookupQuickCode();return;}
@@ -281,26 +265,23 @@ function scannerKeydown(e){
  if((e.key==='Enter'||e.key==='Tab')&&['pos-code','pos-search'].includes(target.id)){
   // Tab is accepted only on the scanner field when it contains a code.
   if(e.key==='Tab'&&(target.id!=='pos-code'||!target.value.trim()))return;
-  e.preventDefault();scanSale(target.value);return;
+   e.preventDefault();
+   if(target.id==='pos-search'&&!state.products.some(p=>p.codigo===target.value.trim())){const p=state.products.find(p=>matches(p,target.value)&&(saleCategory==='all'||p.categoria===saleCategory));if(p&&target.value.trim()){changeCart(p.id);render();}return;}
+   scanSale(target.value);return;
  }
  // Resume scanning after clicking a non-editable control without stealing text input.
  const editable=target.matches?.('input,select,textarea,[contenteditable="true"]');
  if(/^[a-zA-Z0-9]$/.test(e.key)&&!editable){e.preventDefault();const input=$('#pos-code');input.value=e.key;input.focus({preventScroll:true});}
 }
-function productResults(){
- const list=state.products.filter(p=>matches(p,query)&&(saleCategory==='all'||p.categoria===saleCategory));
- return '<div class="sale-products">'+(list.map(p=>{const left=p.stock-(cart.find(l=>l.id===p.id)?.cant||0);
- return '<button class="sale-product" data-action="add" data-id="'+p.id+'" aria-label="Agregar '+esc(p.nombre)+'"><span><strong>'+esc(p.nombre)+'</strong><small>'+esc(p.categoria)+'</small></span><span class="align-right"><strong>'+cash(p.precio)+'</strong><small class="'+(left<=0?'danger-text':'')+'">'+(p.stock===0?'Sin stock':left===0?'Todo en carrito':left+' disponibles')+'</small></span></button>';}).join('')||'<p class="empty">No hay productos en esta selección.</p>')+'</div>';
-}
 function quickCreate(code='',templateId=null,message=''){
  const base=templateId?get(templateId):null;
  const cat=base?.categoria||quickDefaults.categoria,kind=base?.tipo||quickDefaults.tipo;
- modal('Alta rápida de productos',
+  modal('Agregar producto',
  '<p class="notice">'+esc(message||'Guardá un producto y seguí con el próximo. La categoría y el tipo se mantienen; los importes y el stock se completan para cada alta.')+'</p>'+
  '<section class="form-section"><div class="code-lookup"><label class="field grow">Código de barras<input id="quick-code" name="codigo" type="text" value="'+esc(code)+'" maxlength="40" autocomplete="off" placeholder="Escaneá o dejá vacío para generar un código"></label>'+btn('Buscar código','lookup-code')+'</div><div id="quick-code-result" role="status"></div>'+field('Nombre del producto','nombre',base?.nombre||'','text','id="quick-name" maxlength="120" placeholder="Ej.: Leche entera 1 litro"')+'<div class="form-grid">'+formSelect('Categoría','categoria',categoryChoices(),cat,'id="product-category"')+formSelect('Tipo de producto','tipo',typeChoices(cat),kind,'id="product-kind"')+'</div></section>'+
  '<section class="form-section"><h3>Importes y cantidad inicial</h3><div class="form-grid">'+field('Precio de venta ($)','precio',base?.precio??'','number','min=".01" step=".01"')+field('Costo unitario ($)','costo',base?.costo??'','number','min="0" step=".01"')+'</div>'+field('Stock inicial (unidades)','stock',0,'number','min="0" step="1" id="initial-stock"')+shortcuts('initial-stock',[1,6,12,24])+'</section>'+
  (base?'<p class="notice">Se copiaron nombre, categoría, tipo e importes de '+esc(base.nombre)+'. Revisá la presentación y los importes. El código y el stock son nuevos.</p>':'')+
- '<label class="check-label"><input type="checkbox" name="continue" checked> Seguir cargando productos después de guardar</label><p class="muted">La reposición tiene valores iniciales que podés ajustar después desde la ficha.</p>',
+  '<label class="check-label"><input type="checkbox" name="continue" '+(code?'':'checked')+'> Guardar y agregar otro producto</label><p class="muted">Podés ajustar las sugerencias de reposición desde la ficha.</p>',
  'Guardar producto',fd=>{
  const values=Object.fromEntries(fd);
  if(!categoryChoices().includes(values.categoria)||!typeChoices(values.categoria).includes(values.tipo))throw Error('Elegí una categoría y un tipo de la lista.');
@@ -308,7 +289,7 @@ function quickCreate(code='',templateId=null,message=''){
  if(ok){
   quickDefaults={categoria:created.categoria,tipo:created.tipo};
   if(unknownScan===created.codigo)unknownScan='';
-  modalAfterSuccess=fd.get('continue')?()=>quickCreate('',null,'Guardado: '+created.nombre+'. Escaneá o cargá el siguiente producto.'):null;
+   modalAfterSuccess=fd.get('continue')?()=>quickCreate('',null,'Guardado: '+created.nombre+'. Escaneá o cargá el siguiente producto.'):code&&view==='home'?()=>{saleResetEntry();scanSale(created.codigo);}:null;
  }
  return ok;
  });
@@ -338,26 +319,21 @@ function editProduct(pid){
  return mutate(s=>{if(pid){const item=s.products.find(x=>x.id===pid);for(const key of ['precio','costo'])if(item[key]!==values[key])Core.prices(s,[pid],0,values[key],key);Object.assign(item,values);}else{s.products.push({...p,...values});s.movements.push({id:Core.id(),productId:p.id,at:new Date().toISOString(),qty:values.stock,type:'Inicial',reason:'Alta de producto'});}});
  });
 }
-function checkout(){
- if(!cart.length)return;
- modal('Confirmar venta','<section class="form-section"><h3>Detalle de la compra</h3><div class="preview">'+cart.map(l=>'<div class="simple-row"><span>'+esc(get(l.id).nombre)+' × '+l.cant+'</span><strong>'+cash(get(l.id).precio*l.cant)+'</strong></div>').join('')+'</div><div class="basket-total"><span>Total a cobrar</span><strong>'+cash(total())+'</strong></div></section><section class="form-section"><h3>Datos de la venta</h3><div class="form-grid">'+formSelect('Tipo de consumidor','customerType',CONSUMERS,'Consumidor final')+formSelect('Medio de pago','payment',['Efectivo','Transferencia','Tarjeta'],'Efectivo')+'</div><details class="optional-field"><summary>Agregar nombre o una observación (opcional)</summary><label class="field">Nombre / referencia<input name="customer" maxlength="100"></label><label class="field">Observación<input name="note" maxlength="240"></label></details></section><p class="notice">Confirmá cuando el cobro esté realizado. Se descontará el stock. El escaneo se retoma al cerrar esta ventana.</p>','Confirmar y registrar venta',fd=>{
- const customerType=fd.get('customerType')||'Consumidor final',payment=fd.get('payment');
- if(!CONSUMERS.includes(customerType)||!['Efectivo','Transferencia','Tarjeta'].includes(payment))throw Error('Elegí las opciones de venta.');
- const ok=mutate(s=>{const sale=Core.sell(s,cart,payment);sale.customerType=customerType;sale.customer=String(fd.get('customer')||'').trim()||customerType;sale.note=String(fd.get('note')||'').trim();});
- if(ok){cart=[];query='';unknownScan='';scanFeedback='Venta guardada. Escaneá para comenzar una nueva orden.';homeStatus='all';}return ok;
- });
-}
 function depot(){
- return '<div class="workspace-heading"><div><h2>Depósito</h2><p>Productos organizados por categoría.</p></div>'+'<div class="row-actions">'+btn('Alta rápida / consecutiva','quick-create','',true)+btn(icon('plus')+' Nuevo producto','new-product')+'</div>'+'</div><div class="section-tabs">'+chip('Stock por categoría','depot-tab','stock',depotTab)+chip('Movimientos','depot-tab','movements',depotTab)+'</div>'+
+  return '<div class="workspace-heading"><div><h2>Catálogo de productos</h2><p>Consultá existencias y registrá cada movimiento.</p></div>'+btn(icon('plus')+' Agregar producto','quick-create','',true)+'</div>'+productTabs()+
  (depotTab==='movements'?'<section class="panel"><h2>Últimos movimientos</h2>'+movementsTable(state.movements.slice(-60).reverse())+'</section>':
- '<section class="panel catalog-controls">'+catalogToolbar()+'<div class="chips">'+chip('Todos','stock','all',stockFilter)+chip('Stock bajo','stock','low',stockFilter)+chip('Sin stock','stock','zero',stockFilter)+'</div><p class="muted">Indicá la cantidad y elegí Sumar o Restar. Las salidas requieren motivo y confirmación.</p></section><div id="depot-table">'+depotTable()+'</div>');
+  '<section class="panel catalog-controls">'+catalogToolbar()+'<div class="chips">'+chip('Todos','stock','all',stockFilter)+chip('Stock bajo','stock','low',stockFilter)+chip('Sin stock','stock','zero',stockFilter)+'</div></section><div id="depot-table">'+depotTable()+'</div>');
+}
+function productTabs(){
+ return '<div class="section-tabs" aria-label="Secciones de productos">'+btn('Stock','product-stock',view==='products'&&depotTab==='stock'?'aria-current="page"':'')+btn('Precios y costos','open-prices',view==='prices'?'aria-current="page"':'')+btn('Movimientos','product-movements',view==='products'&&depotTab==='movements'?'aria-current="page"':'')+'</div>';
 }
 function moneyEditor(p,key){
  return '<form class="inline-price" data-price="'+p.id+'" data-value-field="'+key+'"><span>$</span><input aria-label="'+(key==='costo'?'Costo':'Precio')+' de '+esc(p.nombre)+'" id="'+key+'-'+p.id+'" name="price" type="number" min="'+(key==='costo'?'0':'.01')+'" max="1000000000" step=".01" value="'+esc(moneyDrafts[p.id+':'+key]??p[key])+'" required><button class="button save-price" type="submit">Guardar</button></form>';
 }
 function depotTable(){
- const list=filteredProducts(),pricing=view==='prices';
- if(!list.length)return '<p class="empty panel spaced">No hay productos para estos filtros.</p>';
+  const list=filteredProducts(),pricing=view==='prices';
+  if(!list.length)return '<p class="empty panel spaced">No hay productos para estos filtros.</p>';
+  if(!pricing)return '<div class="table-wrap panel flush spaced"><table><thead><tr><th>Producto</th><th>Categoría</th><th class="numeric">Stock actual</th><th class="numeric">Precio de venta</th><th>Estado</th><th>Acciones</th></tr></thead><tbody>'+list.map(p=>{const low=Core.replenishment(state,p).critical;return '<tr><td><button class="product-link" data-action="product-detail" data-id="'+p.id+'">'+esc(p.nombre)+'</button><small>'+esc(p.codigo)+'</small></td><td>'+esc(p.categoria)+'</td><td class="numeric"><strong>'+p.stock+' u.</strong></td><td class="numeric">'+cash(p.precio)+'</td><td><span class="pill '+(p.stock===0?'red':low?'amber':'neutral')+'">'+(p.stock===0?'Sin stock':low?'Stock bajo':'Disponible')+'</span></td><td>'+btn('Gestionar stock','stock','data-id="'+p.id+'"')+'</td></tr>';}).join('')+'</tbody></table></div>';
  const groups=[...new Set(list.map(p=>p.categoria))].sort();
  return groups.map(cat=>{
  const rows=list.filter(p=>p.categoria===cat),ids=rows.map(p=>p.id);
@@ -421,8 +397,9 @@ function stockDialog(pid,initialMode='entry',initialQty=1){
  '<div id="stock-qty-field">'+field('Cantidad de unidades','qty',initialQty,'number','min="1" step="1" id="stock-qty"')+'</div>'+shortcuts('stock-qty',[1,6,12,24])+
  formSelect('Motivo','reason',stockReasons(initialMode),stockReasons(initialMode)[0],'id="stock-reason"')+
  '<div id="stock-preview" class="stock-preview"></div><p class="muted" id="stock-help"></p>',
- 'Confirmar movimiento',fd=>{
- const mode=fd.get('mode'),n=Core.number(fd.get('qty'),'Unidades',mode==='adjust'?0:1,true),reason=String(fd.get('reason')||'').trim();
+  'Confirmar movimiento',fd=>{
+  const mode=fd.get('mode'),n=Core.number(fd.get('qty'),'Unidades',mode==='adjust'?0:1,true),reason=String(fd.get('reason')||'').trim();
+  if(mode==='entry'&&Core.pendingUnits(state,pid)&&!fd.get('additional'))throw Error('Este producto tiene pedidos pendientes. Registrá su recepción desde Pedidos o confirmá que es una entrada adicional.');
  const ok=mutate(s=>recordStock(s,pid,mode,n,reason));if(ok)delete stockDrafts[pid];return ok;
  });
  $('#stock-mode').value=initialMode;$('#stock-qty').value=String(initialQty);previewStock();
@@ -434,16 +411,19 @@ function previewStock(){
  const valid=String(input.value).trim()!==''&&Number.isInteger(n)&&n>=(mode==='adjust'?0:1)&&n<=1e9&&next>=0&&next<=1e9&&(mode!=='adjust'||next!==p.stock);
  $('#modal-submit').disabled=!valid;
  $('#modal-submit').textContent=mode==='exit'?'Confirmar salida de stock':mode==='adjust'?'Confirmar recuento':'Confirmar ingreso';
- $('#stock-help').textContent=mode==='exit'?(n>p.stock?'No podés restar más unidades que el stock disponible.':'Esta salida queda registrada con su motivo. No genera una venta ni un cobro.'):mode==='adjust'?'Indicá el total que contaste; puede ser mayor o menor que el stock actual.':'Si esta mercadería tiene un pedido pendiente, recibila desde Pedidos.';
+  $('#stock-help').textContent=mode==='exit'?(n>p.stock?'No podés restar más unidades que el stock disponible.':'Esta salida queda registrada con su motivo. No genera una venta ni un cobro.'):mode==='adjust'?'Indicá el total que contaste; puede ser mayor o menor que el stock actual.':'Si esta mercadería tiene un pedido pendiente, recibila desde Pedidos.';
+  const pending=Core.pendingUnits(state,p.id);
+  if(mode==='entry'&&pending)$('#stock-help').innerHTML='<span>Hay '+pending+' unidades pendientes de recibir. Para recibirlas, abrí el pedido correspondiente.</span><label class="check-label spaced"><input type="checkbox" name="additional" required> Esta entrada es adicional a los pedidos pendientes.</label>';
  $('#stock-preview').innerHTML='<div><small>Stock actual</small><strong>'+p.stock+' u.</strong></div><span>→</span><div><small>Stock después de guardar</small><strong class="'+(next<0?'danger-text':'')+'">'+(Number.isFinite(next)?next:'—')+' u.</strong></div>';
 }
 
 document.addEventListener('submit',e=>{
  e.preventDefault();
  if(e.target.dataset?.purchaseAdd){try{const qty=Core.number(new FormData(e.target).get('qty'),'Cantidad',1,true);purchaseQty(e.target.dataset.purchaseAdd,qty,true);}catch(err){notify(err.message);}return;}
- if(e.target.id==='scanner-form'){scanSale(new FormData(e.target).get('code'));return;}
- if(e.target.id==='dialog-form'){
-   try{if(modalAction(new FormData(e.target))){const next=modalAfterSuccess;modalAfterSuccess=null;$('#modal').close();render();notify('Operación guardada.');if(next)next();}}
+  if(e.target.id==='scanner-form'){scanSale(new FormData(e.target).get('code'));return;}
+  if(e.target.id==='dialog-form'){
+    const saleOperation=['weight','checkout'].includes(saleDialog);
+    try{if(modalAction(new FormData(e.target))){const next=modalAfterSuccess;modalAfterSuccess=null;$('#modal').close();render();if(!saleOperation)notify('Operación guardada.');if(next)next();}}
    catch(err){$('#modal-error').textContent=err.message;}
  }else if(e.target.dataset.entry){
    try{const pid=e.target.dataset.entry,n=Core.number(new FormData(e.target).get('qty'),'Unidades',1,true);
@@ -457,11 +437,20 @@ document.addEventListener('submit',e=>{
  }
 });
 document.addEventListener('click',e=>{
+  const saleControl=e.target.closest('[data-sale-command],[data-sale-select]');
+  if(saleControl){saleCommand(saleControl.dataset.saleCommand||'select',saleControl.dataset.saleSelect);return;}
  const nav=e.target.closest('[data-nav]');if(nav){view=nav.dataset.nav;query='';render();window.scrollTo(0,0);return;}
  const filter=e.target.closest('[data-filter]');
  if(filter){const {filter:key,value}=filter.dataset;if(key==='purchase-tab')purchaseTab=value;if(key==='purchase-filter')purchaseFilter=value;if(key==='purchase-status')purchaseHistoryStatus=value;if(key==='depot-tab')depotTab=value;if(key==='edit-value')editValue=value;if(key==='home-status')homeStatus=value;if(key==='orders-range'){ordersRange=value;ordersPage=1;}if(key==='orders-sort')ordersSort=value;if(key==='period')period=value;if(key==='history')historyFilter=value;if(key==='history-scope')historyAll=value==='all';if(key==='stock')stockFilter=value;if(key==='alerts')alertFilter=value;render();return;}
  const el=e.target.closest('[data-action]');if(!el)return;const id=el.dataset.id;
- switch(el.dataset.action){
+  switch(el.dataset.action){
+  case 'report-sort':ordersSort=el.dataset.sort;render();$('#report-products').open=true;break;
+   case 'remove-cart':saleRemove(id);break;
+  case 'product-stock':depotTab='stock';go('products');break;
+  case 'product-movements':depotTab='movements';go('products');break;
+  case 'ticket':ticketDialog(id);break;
+  case 'ticket-pdf':downloadTicket(id);break;
+  case 'ticket-print':printTicket(id);break;
  case 'supplier-add':supplierDialog();break;
  case 'purchase-save':savePurchaseDialog();break;
  case 'purchase-detail':purchaseDetail(id);break;
@@ -487,10 +476,10 @@ document.addEventListener('click',e=>{
  case 'ranking-toggle':ordersShowAll=!ordersShowAll;render();break;
  case 'orders-prev':ordersPage=Math.max(1,ordersPage-1);render();break;
  case 'orders-next':ordersPage++;render();break;
- case 'print-sale':window.print();break;
+  case 'print-sale':printTicket(id);break;
  case 'close':$('#modal').close();focusScanner();break;
- case 'add':case 'qty':if(changeCart(id,Number(el.dataset.delta||1)))render();else focusScanner();break;
- case 'clear':cart=[];query='';scanFeedback='Carrito vacío. Listo para una nueva orden.';unknownScan='';render();break;
+    case 'add':case 'qty':{const ok=changeCart(id,Number(el.dataset.delta||1));if(ok&&el.dataset.action==='add')saleResolveRead();if(!$('#modal').open){saleSearchOpen=false;query='';}render();break;}
+    case 'clear':modal('Vaciar venta','<p>Se quitarán los productos de la venta en curso. El stock no se modifica.</p>','Vaciar venta',()=>{cart=[];saleUndo=null;saleSelected=null;saleResetEntry();query='';scanFeedback='Venta vacía. Listo para escanear.';return true;});break;
  case 'checkout':checkout();break;
  case 'quick-create':quickCreate();break;
  case 'create-scanned':quickCreate(unknownScan);break;
@@ -524,12 +513,14 @@ document.addEventListener('input',e=>{
  if(e.target.id==='orders-search'){ordersQuery=e.target.value;ordersPage=1;$('#orders-results').innerHTML=ordersResults();}
  if(e.target.id==='bulk-pct')previewBulk();
  if(e.target.id==='stock-qty')previewStock();
- if(e.target.id==='pos-search'){query=e.target.value;$('#pos-results').innerHTML=productResults();}
+  if(e.target.id==='pos-search'){query=e.target.value;saleSearchIndex=0;$('#pos-results').innerHTML=productResults();}
  if(e.target.id==='depot-search'){query=e.target.value;$('#depot-table').innerHTML=depotTable();}
  if(e.target.id==='history-search'){historyQuery=e.target.value;const pos=e.target.selectionStart;render();$('#history-search').focus();$('#history-search').setSelectionRange(pos,pos);}
 });
 document.addEventListener('change',e=>{
- const el=e.target;
+   const el=e.target;
+   if(el.id==='sale-print-setting'){el.checked=saleSetPrint(el.checked);return;}
+   if(el.dataset.cartQuantity){saleCommitQuantity(el);return;}
  if(el.id==='purchase-category'){purchaseCategory=el.value;$('#purchase-catalog').innerHTML=purchaseCatalog();}
  if(el.id==='purchase-supplier'){if(!updatePurchaseDraft(d=>{d.supplier=el.value;}))el.value=purchaseDraft().supplier;}
  if(el.dataset.purchaseLine){
@@ -537,7 +528,7 @@ document.addEventListener('change',e=>{
   try{const qty=Core.number(el.value,'Cantidad a pedir',1,true);if(updatePurchaseDraft(d=>{const line=d.items.find(l=>l.productId===pid);if(!line)throw Error('El producto ya no está en el borrador.');line.qty=qty;}))$('#purchase-draft-total').textContent=draftUnits()+' u.';else el.value=purchaseDraft().items.find(l=>l.productId===pid)?.qty||1;}
   catch(err){el.value=purchaseDraft().items.find(l=>l.productId===pid)?.qty||1;notify(err.message);}
  }
- if(el.id==='sale-category'){saleCategory=el.value;$('#pos-results').innerHTML=productResults();focusScanner();}
+  if(el.id==='sale-category'){saleCategory=el.value;saleSearchIndex=0;$('#pos-results').innerHTML=productResults();}
  if(el.id==='product-category'){$('#product-kind').innerHTML=typeChoices(el.value).map(t=>'<option value="'+esc(t)+'">'+esc(t)+'</option>').join('');$('#product-kind').value='General';}
  if(el.id==='stock-mode'){$('#stock-reason').innerHTML=stockReasons(el.value).map(r=>'<option>'+esc(r)+'</option>').join('');previewStock();}
  if(el.id==='bulk-direction'){bulkDraft.direction=el.value;previewBulk();}
@@ -557,8 +548,33 @@ document.addEventListener('change',e=>{
  if(el.id==='report-date'&&el.value){anchor=el.value;render();}
 });
 document.addEventListener('keydown',scannerKeydown);
+document.addEventListener('keyup',saleKeyup);
+window.addEventListener('blur',()=>{saleF8Down=false;});
 $('#modal').addEventListener('close',focusScanner);
 window.addEventListener('storage',e=>{
- if(e.key===KEY){try{state=e.newValue?Core.upgrade(JSON.parse(e.newValue)):state;cart=[];selected.clear();$('#modal').close();stockDrafts={};moneyDrafts={};render();notify('Datos actualizados desde otra pestaña. Revisá el carrito.');}catch{notify('No se pudieron actualizar los datos. Recargá la página.');}}
+  if(e.key===KEY){try{state=e.newValue?Core.upgrade(JSON.parse(e.newValue)):state;cart=[];saleUndo=null;saleResetEntry();selected.clear();$('#modal').close();stockDrafts={};moneyDrafts={};render();notify('Datos actualizados desde otra pestaña. Revisá el carrito.');}catch{notify('No se pudieron actualizar los datos. Recargá la página.');}}
 });
+function ticketContent(s){
+ return '<article class="receipt"><header><h2>Despensa el Trébol</h2><p>Ticket de venta · '+orderNumber(s)+'</p><p>'+fmtDate(s.at)+'</p>'+(s.status==='cancelled'?'<strong>VENTA ANULADA</strong>':'')+'</header><div class="receipt-items">'+s.items.map(l=>'<div><strong>'+esc(l.nombre)+'</strong><div class="receipt-row"><span>'+l.cant+' × '+cash(l.precio)+'</span><strong>'+cash(Core.money(l.cant*l.precio))+'</strong></div></div>').join('')+'</div><div class="receipt-row receipt-total"><span>Total</span><strong>'+cash(s.total)+'</strong></div><p>Medio de pago: '+esc(s.payment)+'</p>'+(s.customer?'<p>Cliente: '+esc(s.customer)+'</p>':'')+(s.note?'<p>'+esc(s.note)+'</p>':'')+'<footer>Gracias por tu compra.<br>DEMO · No válido como comprobante fiscal.</footer></article>';
+}
+function reportInsights(){
+ const data=Core.report(state,Core.range(period,new Date(anchor+'T12:00:00')),reportCategory,paymentFilter);
+ const rows=data.top.slice().sort((a,b)=>b[ordersSort]-a[ordersSort]||b.units-a.units);
+ return '<details class="panel spaced"><summary>Costos y margen bruto del período</summary><div class="detail-grid"><div><small>Costo de mercadería vendida</small><strong>'+(data.cost===null?'Sin datos completos':cash(data.cost))+'</strong></div><div><small>Margen bruto estimado</small><strong>'+(data.margin===null?'Sin datos completos':cash(data.margin))+'</strong></div></div><p class="muted">Se utilizan los costos históricos de cada venta. El margen no descuenta gastos, comisiones ni impuestos.'+(data.missingCostUnits?' Hay '+data.missingCostUnits+' unidades sin costo histórico.':'')+'</p></details><details id="report-products" class="panel spaced"><summary>Detalle de productos vendidos</summary><div class="chips">'+btn('Por unidades','report-sort','data-sort="units" aria-pressed="'+(ordersSort==='units')+'"')+btn('Por importe','report-sort','data-sort="total" aria-pressed="'+(ordersSort==='total')+'"')+'</div><div class="table-wrap"><table><thead><tr><th>Producto</th><th class="numeric">Unidades</th><th class="numeric">Importe vendido</th><th class="numeric">Participación</th></tr></thead><tbody>'+rows.map(r=>'<tr><td>'+esc(r.nombre)+'</td><td class="numeric">'+r.units+'</td><td class="numeric">'+cash(r.total)+'</td><td class="numeric">'+(data.total?r.total/data.total*100:0).toLocaleString('es-AR',{maximumFractionDigits:1})+'%</td></tr>').join('')+'</tbody></table></div>'+(!rows.length?'<p class="empty">No hay ventas confirmadas en este período.</p>':'')+'</details>';
+}
+function ticketDialog(id){
+ const s=state.sales.find(s=>s.id===id);if(!s)return;
+ $('#modal').close();$('#modal').classList.remove('drawer');
+ $('#modal').innerHTML='<header class="modal-heading"><h2 id="modal-title">Ticket de venta</h2>'+btn('Cerrar','close')+'</header>'+ticketContent(s)+'<div class="modal-actions">'+btn('Imprimir ticket','ticket-print','data-id="'+s.id+'"',true)+btn('Descargar PDF','ticket-pdf','data-id="'+s.id+'"')+'</div><p class="muted">La venta ya está guardada. Imprimir o descargar no modifica el stock.</p>';
+ $('#modal').showModal();
+}
+function printTicket(id){
+  const s=state.sales.find(s=>s.id===id);if(!s)return;
+  $('#print-ticket').innerHTML=ticketContent(s);salePrinting=true;
+  try{window.print();}finally{salePrinting=false;focusScanner();}
+}
+function downloadTicket(id){
+ try{const s=state.sales.find(s=>s.id===id);if(!s)throw Error('No se encontró la venta.');const bytes=PurchasePDF.ticket(s),url=URL.createObjectURL(new Blob([bytes],{type:'application/pdf'})),a=document.createElement('a');a.href=url;a.download='Trebol-'+orderNumber(s)+'.pdf';a.click();setTimeout(()=>URL.revokeObjectURL(url),30000);}
+ catch(error){notify('La venta sigue guardada. No se pudo descargar el ticket: '+error.message);}
+}
 render();

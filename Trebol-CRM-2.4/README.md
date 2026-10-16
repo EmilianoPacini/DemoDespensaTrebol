@@ -1,5 +1,81 @@
 # Despensa el Trébol — CRM 2.4
 
+## Puesto de venta: lector y teclado
+
+La compra ocupa el área principal de **Vender**, con letras y controles grandes: productos de 18–19 px, cantidades de 22 px y total de revisión de 44–56 px. **F2 / Buscar** abre el catálogo sin abandonar la compra; flechas y Enter eligen y agregan. En móvil, total y revisión permanecen sobre la navegación inferior.
+
+La búsqueda filtra en vivo por nombre, marca, presentación, categoría, tipo, código o PLU; admite varias palabras en cualquier orden y no distingue mayúsculas ni acentos. Cada resultado muestra nombre, marca y presentación cuando están cargadas, categoría/tipo, venta por unidad/peso, precio y cantidad disponible. Marca y contenido del envase se completan en **Productos → Editar → Marca y presentación**, sin cambiar el stock ni los bultos de compra. Los datos existentes se conservan y no se inventan marcas o pesos faltantes.
+
+- Escanear selecciona el producto agregado. El mismo código vuelve a sumar una unidad.
+- **6 * y escanear:** agrega seis unidades en una lectura. El multiplicador es visible y de un solo uso; Esc lo cancela. No se aplica a peso y se cancela también al fallar una lectura. Un código registrado con asterisco conserva su significado.
+- **+ / −:** sumar / restar una unidad de la línea seleccionada, con el campo del lector vacío. También sirven F6/F7 y los operadores numéricos. No actúan al escribir en búsqueda o editar cantidades; se respetan los prefijos de códigos registrados con signos.
+- **F3:** editar la cantidad total en la propia línea, sin diálogo. Enter guarda y Esc cancela. Ejemplo: escanear una leche, F3, 6, Enter deja seis leches, no siete. Para peso, abre el ingreso enfocado en gramos.
+- **↑ / ↓:** seleccionar otra línea sin Alt. **Supr** quita la línea y **Ctrl+Z** deshace la última acción, solo antes de confirmar y si los datos no cambiaron de revisión.
+- **Peso:** ingresar gramos o elegir explícitamente kg (admite coma/punto); cambiar unidad vacía el campo para evitar reinterpretar un número. Una nueva porción suma; F3 reemplaza el peso total. Se conservan lotes, vencimientos y etiquetas configurables.
+- **F8 → F8:** primera pulsación revisa total; soltar y pulsar nuevamente confirma. Mantener la tecla apretada no registra. Enter del lector y Ctrl+Enter no confirman. Esc conserva la compra. El cierre no pide cliente, tipo de consumidor, observaciones ni pago: las ventas nuevas usan consumidor final y medio **Sin registrar**, sin modificar datos históricos.
+- **Opciones de este puesto → Abrir impresión al confirmar:** desactivado inicialmente; se recuerda por navegador y no se pregunta en cada cierre. Primero guarda y descuenta stock una vez, después abre el diálogo de impresión. Cancelarlo o reimprimir no registra otra venta. No se confirma la salida física del papel.
+- **Error de lectura:** sonido diferenciado cuando el navegador lo permite y aviso persistente. F2 busca un reemplazo y Esc omite expresamente. No permite cerrar ni incorporar lecturas posteriores hasta resolverlo; no abre alta de productos en medio de la fila.
+- **Códigos cortos:** buscar por código de producto o identificador de balanza (PLU). Una etiqueta de peso configurada agrega directamente y mantiene la asignación de lotes por vencimiento; el lote físico puede revisarse desde la línea.
+
+Configurar el lector como **teclado USB con una única terminación CR/Enter**, no doble Enter. La demo no procesa pagos ni emite comprobantes fiscales. Integración física de balanza e impresión sin diálogo: pendientes del hardware real.
+
+**Archivos:** servir también `sales-ui.js`, cargado después de las reglas de stock y antes de `app.js`. Es la única implementación del compositor, búsqueda, líneas y cierre; `stock-ui.js` conserva los demás circuitos.
+
+**Validación de esta mejora:** 66 pruebas automatizadas aprobadas y circuito real en Chrome con los scripts de producción: multiplicador, cantidad inline, Esc, flechas, Supr/deshacer, búsqueda y PLU, gramos/kg, F8 repetido, error pendiente, fallo de guardado, registro único, apertura de impresión simulada y PDF. Escritorio 1366 × 768 y móvil 390 × 844, con carrito largo y sin desbordamiento horizontal ni errores JavaScript. La prueba con lector e impresora físicos sigue pendiente.
+
+La prueba DOM reproducible es `tests/cashier.browser.cjs`. Con el servidor estático activo, ejecutar `node tests/cashier.browser.cjs` con `playwright-core` disponible. Admite `PLAYWRIGHT_MODULE` (ruta de instalación externa), `BASE_URL`, `CHROME_PATH` y `SCREENSHOT_DIR`. No agrega dependencias al frontend.
+
+## Circuitos esenciales de despensa — frontend
+
+La demo incorpora venta por unidad/peso, ingreso en gramos, presentaciones de compra, último costo real de recepción, lotes/vencimientos, mermas, recuentos por sesión, devolución parcial, reposición sugerida editable y pedidos PDF/imprimibles. Se conservan los datos anteriores; los productos anteriores siguen siendo por unidad.
+
+### Uso rápido
+
+- **Productos → Agregar/Editar:** elegir Unidad o Peso; precio/costo por u. o kg; caja/pack en productos unitarios; proveedor habitual y vencimientos opcionales. La medida queda fija una vez que existen movimientos.
+- **Vender:** escanear productos unitarios suma una unidad. Elegir un producto por peso abre ingreso de gramos; muestra kg y subtotal. Una venta puede combinar ambos. El carrito permite editar peso y elegir el lote físico retirado; por defecto propone primero el que vence antes.
+- **Productos → Gestionar stock:** recibir por unidad, bulto o kg, con costo por unidad/bulto/kg, proveedor y documento opcional. Convertir bultos no requiere cuentas manuales. Pedidos abiertos deben recibirse desde su detalle; una entrada adicional requiere distinguirla.
+- **Pedidos → Registrar recepción:** admite cantidades parciales, costo efectivo y vencimiento/lote por producto. Usar cero para lo no entregado. La recepción actualiza el último costo; no altera ventas anteriores.
+- **Vencimientos:** filtros para próximos siete días y vencidos. Vencido significa fecha anterior al día actual; la fecha indicada sigue siendo vendible ese día. La ficha permite revisar/corregir el vencimiento. Stock físico incluye vencidos; disponible los excluye. Registrar baja por vencimiento/rotura/consumo o devolución a proveedor en unidades o kg.
+- **Productos → Hacer recuento:** catálogo/categoría, búsqueda por nombre/código, cantidades por producto/lote, borrador persistente y cierre con diferencias. Un campo vacío es pendiente; cero significa contado en cero. Pausar ventas y recepciones. Si hubo movimientos, “Revisar cambios durante el conteo” actualiza referencias y exige volver a contar los productos afectados.
+- **Pedidos → Preparar reposición sugerida:** elegir proveedor, seleccionar productos y ajustar cantidades. Se descuentan pendientes y se excluyen vencidos; se redondea a bultos completos o 50 g. El borrador admite cantidades por unidad, bulto o kg. Guardar no aumenta stock; genera un PDF descargable. El detalle permite impresión, descarga posterior, recepción y repetición.
+- **Ventas → Ver venta → Devolución parcial:** elegir producto, cantidad/peso y destino vendible/no vendible. Nunca permite superar el saldo vendido. La anulación completa queda disponible sólo antes de registrar devoluciones. Reintegros monetarios se realizan fuera de la demo.
+- **Reportes:** ventas originales y devoluciones del período separadas; ventas netas, unidades y kg sin sumarlos; stock físico/disponible, mermas y CSV. El margen es estimado; valoración a último costo, no valuación contable por capas. Movimientos antiguos sin costo histórico utilizan el costo actual como aproximación para reportar pérdidas.
+- **Opciones:** copia JSON descargable y restauración validada con resumen antes de reemplazar. No es sincronización entre equipos.
+
+### Etiquetas de balanza
+
+En **Opciones → Configurar formato de etiqueta**, definir prefijo, longitud, posiciones de producto/valor (desde 1), escala de peso o decimales del importe y verificación EAN opcional. Asignar identificador al producto por peso. Un código habitual sólo identifica el producto y pide gramos; una etiqueta con peso carga la cantidad (si hay lotes, permite revisar el lote). Si sólo tiene importe, pide el peso impreso y muestra la diferencia; usar el importe de etiqueta requiere selección explícita. Códigos desconocidos o mal formados no descuentan stock.
+
+El formato mostrado como ejemplo es de prueba: no corresponde a una balanza confirmada. La compatibilidad física queda pendiente de una etiqueta real. La carga manual está siempre disponible.
+
+Las demos nuevas incluyen jamón y pan por peso. Un catálogo anterior se conserva sin agregar productos de ejemplo automáticamente; se pueden dar de alta desde Productos.
+
+### Archivos y comprobación
+
+Servir todos los archivos de esta carpeta: se agregaron **stock-core.js** (reglas y migración) y **stock-ui.js** (flujos de interfaz). Se cargan antes y después de app.js, respectivamente. La lógica sigue siendo local, sin backend.
+
+Verificación acotada: **54 pruebas automatizadas aprobadas** (incluidas cuatro nuevas de circuitos esenciales) y una pasada en Chrome de venta mixta, ticket, pedido PDF, recepción parcial, devolución, recuento y alta por peso; navegación en escritorio y móvil sin errores JavaScript ni desbordamiento de página.
+
+## Rediseño del frontend
+
+Navegación: **Vender**, **Productos**, **Pedidos**, **Ventas** y **Reportes**. Productos reúne Stock, Precios y costos, y Movimientos. La venta tiene cantidades editables y total visible; el historial permite recuperar el ticket imprimible o descargar su PDF. Pedidos abre con los pendientes de recibir y conserva el borrador de preparación.
+
+### Ver la aplicación localmente
+
+Desde esta carpeta:
+
+```bash
+python3 -m http.server 5173 --bind 0.0.0.0
+```
+
+Abrir http://localhost:5173. No requiere instalación de dependencias.
+
+### Validación del rediseño
+
+50 pruebas automatizadas aprobadas. Verificación adicional en Chrome: escaneo simulado, cantidad editable, confirmación de venta, descarga PDF del ticket, recepción parcial y navegación en 1366 × 768 y 390 × 844, sin errores JavaScript ni desbordamiento horizontal de página. Ticket PDF revisado visualmente. Revisión independiente: corrección del historial de Reportes confirmada como resuelta.
+
+El ticket físico se imprime mediante el diálogo del navegador. El modelo de impresora, ancho final de papel y prueba con lector USB físico siguen pendientes. Los detalles siguientes documentan también el funcionamiento de versiones previas.
+
 Demo de stock, ventas y pedidos a proveedores. HTML, CSS y JavaScript; datos guardados en el navegador.
 
 ## Actualizar
